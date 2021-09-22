@@ -33,7 +33,7 @@ https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.0.0/openGauss-third_party_b
 ##### 代码编译
 使用DCF/build/linux/opengauss/build.sh编译代码, 参数说明请见以下表格。<br>
 | 选项 | 参数               | 说明                                   |
-| ---  | ---               | ---                                    |
+| ---  | :---              | :---                                   |
 | -3rd | [binarylibs path] | 指定binarylibs路径。该路径必须是绝对路径。|
 现在只需使用如下命令即可编译：<br>
 [user@linux dcf]$ sh build.sh -3rd [binarylibs path]<br>
