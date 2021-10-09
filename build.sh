@@ -19,7 +19,7 @@
 
 set -e
 
-DCF_DIR=$(cd "$1"; pwd)
+DCF_DIR=$(pwd)
 BUILD_DIR="${DCF_DIR}/build/linux/opengauss"
 
 cd ${BUILD_DIR}

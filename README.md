@@ -11,30 +11,31 @@
 -   test：测试用例
 -   build：工程构建脚本
 
-#### 二、编译指导与工程构建
-##### 概述
+#### 二、编译指导
+##### 1、概述
 编译DCF需要dcf和binarylibs两个组件。
 -   dcf：dcf的主要代码。可以从开源社区获取。
 -   binarylibs：依赖的第三方开源软件，你可以直接编译openGauss-third_party代码获取，也可以从开源社区下载已经编译好的并上传的一个副本。
-##### 操作系统和软件依赖要求
+##### 2、操作系统和软件依赖要求
 支持以下操作系统：
 -   CentOS 7.6（x86）
 -   openEuler-20.03-LTS<br>
 适配其他系统，可参照openGauss数据库编译指导<br>
 当前DCF依赖第三方软件有securec、lz4、zstd、openssl、cjson;
 编译dcf依赖的第三方软件要求与编译opengauss对依赖的第三方软件要求一致。
-##### 下载dcf
+##### 3、下载dcf
 可以从开源社区下载dcf和openGauss-third_party。
 可以通过以下网站获取编译好的binarylibs。
 https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.0.0/openGauss-third_party_binarylibs.tar.gz
-##### 编译第三方软件
+##### 4、编译第三方软件
 在编译dcf之前，需要先编译dcf依赖的开源及第三方软件。这些开源及第三方软件存储在openGauss-third_party代码仓库中，通常只需要构建一次。如果开源软件有更新，需要重新构建软件。<br>
 用户也可以直接从binarylibs库中获取开源软件编译和构建的输出文件。
-##### 代码编译
+##### 5、代码编译
 使用DCF/build/linux/opengauss/build.sh编译代码, 参数说明请见以下表格。<br>
 | 选项 | 参数               | 说明                                   |
-| ---  | ---               | ---                                    |
+| ---  | :---              | :---                                   |
 | -3rd | [binarylibs path] | 指定binarylibs路径。该路径必须是绝对路径。|
+
 现在只需使用如下命令即可编译：<br>
 [user@linux dcf]$ sh build.sh -3rd [binarylibs path]<br>
 完成编译后，动态库生成在DCF/lib目录中
