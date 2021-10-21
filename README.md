@@ -339,3 +339,7 @@ ___int int dcf_set_work_mode(unsigned int stream_id, dcf_work_mode_t work_mode, 
 ##### 2、执行测试用例
 
 待续...
+
+#### 五、应用实例
+##### 1、GaussDB(for openGauss)使能paxos特性实践
+具体可参考：https://gitee.com/opengauss_yanghaiyan/blog/blob/master/content/zh/post/yanghaiyan/openGauss%E4%BD%BF%E8%83%BDpaxos%E7%89%B9%E6%80%A7%E5%AE%9E%E8%B7%B5.md
