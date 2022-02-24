@@ -27,6 +27,8 @@
 #include "mec.h"
 #include "cm_timer.h"
 #include "replication.h"
+#include "util_defs.h"
+#include "elc_status_check.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,13 +42,19 @@ typedef struct st_elc_info {
     uint32 vote_count;
     uint32 vote_no_count;
     dcf_role_t node_role; // current node role
-    date_t last_hb_time;
-    date_t last_hb_ack[CM_MAX_NODE_COUNT];
+    timespec_t last_hb_time;
+    timespec_t last_hb_ack[CM_MAX_NODE_COUNT];
     dcf_work_mode_t work_mode;
     uint32 vote_num;
     dcf_work_mode_t vote_node_work_mode[CM_MAX_NODE_COUNT];
     uint32 old_leader_id;
-    date_t last_md_rep_time;
+    timespec_t last_md_rep_time;
+    volatile bool32 force_vote;
+    bool32 inter_promote_flag; // Whether the leader obtained last time is given up to a high-priority node.
+    volatile timespec_t leader_start_time;
+    uint32 leader_group;
+    uint32 my_group;
+    uint64 priority;
 } elc_info_t;
 
 static elc_info_t g_stream_list[CM_MAX_STREAM_COUNT];
@@ -68,6 +76,7 @@ status_t get_current_node_role(uint32 stream_id, uint32 current_node_id, uint32 
             LOG_RUN_WAR("[ELC] 1 node mode, force default_role(%d) to leader", node_info.default_role);
         }
         *role = DCF_ROLE_LEADER;
+        (void)elc_stream_set_votefor(stream_id, current_node_id);
         return CM_SUCCESS;
     }
 
@@ -112,6 +121,26 @@ uint32 elc_stream_get_hb_interval_ms()
     }
 }
 
+uint32 elc_stream_get_elc_switch_thd_sec()
+{
+    param_value_t value;
+    if (md_get_param(DCF_PARAM_ELECTION_SWITCH_THRESHOLD, &value) == CM_SUCCESS) {
+        return value.value_elc_switch_thd;
+    } else {
+        return (uint32)CM_DEFAULT_ELC_SWITCH_THD;
+    }
+}
+
+bool32 elc_stream_get_auto_elc_pri_en()
+{
+    param_value_t value;
+    if (md_get_param(DCF_PARAM_AUTO_ELC_PRIORITY_EN, &value) == CM_SUCCESS) {
+        return value.value_auto_elc_priority_en;
+    } else {
+        return (bool32)CM_TRUE;
+    }
+}
+
 param_run_mode_t elc_stream_get_run_mode()
 {
     param_value_t value;
@@ -125,17 +154,12 @@ param_run_mode_t elc_stream_get_run_mode()
 status_t elc_stream_init()
 {
     cm_init_cond(&g_status_notify_cond);
-    if (memset_sp(g_stream_notify, sizeof(role_notify_t) * CM_MAX_STREAM_COUNT, 0,
-                  sizeof(role_notify_t) * CM_MAX_STREAM_COUNT) != EOK) {
-        LOG_RUN_ERR("[ELC]election module init stream notify list failed");
-        return CM_ERROR;
-    }
 
-    if (memset_sp(g_stream_list, sizeof(elc_info_t) * CM_MAX_STREAM_COUNT, 0,
-                  sizeof(elc_info_t) * CM_MAX_STREAM_COUNT) != EOK) {
-        LOG_RUN_ERR("[ELC]election module init stream failed");
-        return CM_ERROR;
-    }
+    MEMS_RETURN_IFERR(memset_sp(g_stream_notify, sizeof(role_notify_t) * CM_MAX_STREAM_COUNT, 0,
+        sizeof(role_notify_t) * CM_MAX_STREAM_COUNT));
+    MEMS_RETURN_IFERR(memset_sp(g_stream_list, sizeof(elc_info_t) * CM_MAX_STREAM_COUNT, 0,
+        sizeof(elc_info_t) * CM_MAX_STREAM_COUNT));
+
     uint32 current_node_id = md_get_cur_node();
     uint32 stream_list[CM_MAX_STREAM_COUNT];
     uint32 stream_count;
@@ -143,33 +167,36 @@ status_t elc_stream_init()
     for (uint32 i = 0; i < stream_count; i++) {
         uint32 stream_id = stream_list[i];
         uint32 leader_id = stg_get_votedfor(stream_id);
-        uint64 term = stg_get_current_term(stream_id);
 
-        dcf_role_t node_role;
-        CM_RETURN_IFERR(get_current_node_role(stream_id, current_node_id, leader_id, &node_role));
         g_stream_list[stream_id].stream_id = stream_id;
         g_stream_list[stream_id].votefor_id = leader_id;
-        g_stream_list[stream_id].current_term = term;
+        g_stream_list[stream_id].current_term = stg_get_current_term(stream_id);
         g_stream_list[stream_id].vote_count = 0;
         g_stream_list[stream_id].vote_no_count = 0;
+        dcf_role_t node_role;
+        CM_RETURN_IFERR(get_current_node_role(stream_id, current_node_id, leader_id, &node_role));
         g_stream_list[stream_id].node_role = node_role;
         g_stream_list[stream_id].vote_num = 0;
         g_stream_list[stream_id].old_leader_id = CM_INVALID_ID32;
         g_stream_list[stream_id].work_mode = WM_NORMAL;
+        g_stream_list[stream_id].force_vote = CM_FALSE;
+        g_stream_list[stream_id].inter_promote_flag = CM_FALSE;
         dcf_node_t node_info;
         CM_RETURN_IFERR(md_get_stream_node_ext(stream_id, current_node_id, &node_info));
-        LOG_RUN_INF("[ELC]node_role: %u", node_info.default_role);
+        g_stream_list[stream_id].my_group = node_info.group;
+        g_stream_list[stream_id].leader_group = node_info.group;
+        g_stream_list[stream_id].priority = node_info.priority;
         if ((leader_id == current_node_id) || (leader_id == CM_INVALID_NODE_ID
             && node_info.default_role == DCF_ROLE_LEADER)) {
             g_stream_list[stream_id].last_hb_time = 0;
         } else {
             g_stream_list[stream_id].last_hb_time =
-                g_timer()->now + CM_MAX_ELC_INIT_WAIT_TIMES * elc_stream_get_elc_timeout_ms() * MICROSECS_PER_MILLISEC;
+                cm_clock_now() + CM_MAX_ELC_INIT_WAIT_TIMES * elc_stream_get_elc_timeout_ms() * MICROSECS_PER_MILLISEC;
         }
         LOG_RUN_INF("[ELC]stream %u init, cur_node_id %u, vote_for %u, last_hb_time %lld",
             stream_id, current_node_id, leader_id, g_stream_list[stream_id].last_hb_time);
         for (uint32 j = 0; j < CM_MAX_NODE_COUNT; j++) {
-            g_stream_list[stream_id].last_hb_ack[j] = g_timer()->now;
+            g_stream_list[stream_id].last_hb_ack[j] = cm_clock_now();
         }
         cm_latch_init(&g_stream_list[stream_id].latch);
     }
@@ -196,21 +223,29 @@ dcf_role_t elc_stream_get_role(uint32 stream_id)
 
 void add_notify_item(uint32 stream_id, uint32 node_id, uint32 new_leader, dcf_role_t old_role, dcf_role_t new_role)
 {
+    uint32 count = 0;
     LOG_DEBUG_INF("[ELC]add_notify_item start");
     cm_latch_x(&g_stream_notify[stream_id].latch, 0, NULL);
     do {
-        if (g_stream_notify[stream_id].stream_id == CM_INVALID_STREAM_ID) {
-            g_stream_notify[stream_id].stream_id = stream_id;
-            g_stream_notify[stream_id].node_id = node_id;
-            g_stream_notify[stream_id].new_leader = new_leader;
-            g_stream_notify[stream_id].old_role = old_role;
-            g_stream_notify[stream_id].new_role = new_role;
-            LOG_DEBUG_INF("[ELC]added change item, stream_id=%u, node_id=%u new_leader=%u old_role=%d new_role=%d",
-                stream_id, node_id, new_leader, old_role, new_role);
+        uint32 pi = g_stream_notify[stream_id].pi;
+        if ((pi + 1) % MAX_NOTIFY_ITEM_NUM != g_stream_notify[stream_id].ci) {
+            g_stream_notify[stream_id].item[pi].node_id = node_id;
+            g_stream_notify[stream_id].item[pi].new_leader = new_leader;
+            g_stream_notify[stream_id].item[pi].old_role = old_role;
+            g_stream_notify[stream_id].item[pi].new_role = new_role;
+            LOG_DEBUG_INF("[ELC]added item, pi=%u, stream_id=%u, node_id=%u new_leader=%u old_role=%d new_role=%d",
+                pi, stream_id, node_id, new_leader, old_role, new_role);
+            g_stream_notify[stream_id].pi = (pi + 1) % MAX_NOTIFY_ITEM_NUM;
             break;
         } else {
             cm_unlatch(&g_stream_notify[stream_id].latch, NULL);
             cm_sleep(CM_SLEEP_10_FIXED);
+            count++;
+            if (count > CM_100X_FIXED) {
+                LOG_RUN_ERR("[ELC]add_item timeout.stream_id=%u, node_id=%u new_leader=%u old_role=%d new_role=%d",
+                    stream_id, node_id, new_leader, old_role, new_role);
+                return;
+            }
             cm_latch_x(&g_stream_notify[stream_id].latch, 0, NULL);
         }
     } while (1);
@@ -221,13 +256,15 @@ void add_notify_item(uint32 stream_id, uint32 node_id, uint32 new_leader, dcf_ro
     LOG_DEBUG_INF("[ELC]add_notify_item end");
 }
 
-status_t get_notify_item(uint32 stream_id, role_notify_t* notify_item)
+status_t get_notify_item(uint32 stream_id, role_notify_item_t* notify_item)
 {
     cm_latch_x(&g_stream_notify[stream_id].latch, 0, NULL);
-    if (g_stream_notify[stream_id].stream_id != CM_INVALID_STREAM_ID) {
-        *notify_item = g_stream_notify[stream_id];
-        g_stream_notify[stream_id].stream_id = CM_INVALID_STREAM_ID;
+    uint32 ci = g_stream_notify[stream_id].ci;
+    if (ci != g_stream_notify[stream_id].pi) {
+        *notify_item = g_stream_notify[stream_id].item[ci];
+        g_stream_notify[stream_id].ci = (ci + 1) % MAX_NOTIFY_ITEM_NUM;
         cm_unlatch(&g_stream_notify[stream_id].latch, NULL);
+        LOG_DEBUG_INF("[ELC]get item success, ci=%u, stream_id=%u", ci, stream_id);
         return CM_SUCCESS;
     }
     cm_unlatch(&g_stream_notify[stream_id].latch, NULL);
@@ -239,7 +276,7 @@ void rep_set_can_write_flag(uint32 stream_id, uint32 flag);
 void elc_stream_notify_proc()
 {
     (void)cm_wait_cond(&g_status_notify_cond, CM_SLEEP_500_FIXED);
-    role_notify_t notify_item;
+    role_notify_item_t notify_item;
     for (uint32 i = 0; i < CM_MAX_STREAM_COUNT; i++) {
         uint32 stream_id = i;
         if (get_notify_item(stream_id, &notify_item) == CM_SUCCESS) {
@@ -251,6 +288,23 @@ void elc_stream_notify_proc()
                 LOG_DEBUG_INF("[ELC]status_changed_notify proc begin");
                 /* cancel can_write flag */
                 rep_set_can_write_flag(stream_id, CM_FALSE);
+
+                uint32 prio_leader = elc_get_rcv_best_priority_node(stream_id);
+                bool32 force_vote = elc_stream_is_force_vote(stream_id);
+                elc_stream_set_force_vote_flag(stream_id, CM_FALSE);
+                LOG_DEBUG_INF("[ELC]max_prio_leader=%u force_vote=%d role=%d", prio_leader, force_vote, role);
+                if (force_vote == CM_FALSE && role == DCF_ROLE_LEADER && prio_leader != CM_INVALID_NODE_ID) {
+                    rep_try_promote_prio_leader(stream_id, prio_leader);
+                    if (elc_stream_get_role(stream_id) != DCF_ROLE_LEADER) {
+                        elc_stream_set_inter_promote_flag(stream_id, CM_TRUE);
+                        continue;
+                    }
+                }
+
+                if (elc_stream_get_inter_promote_flag(stream_id) == CM_TRUE && role != DCF_ROLE_LEADER) {
+                    continue;
+                }
+                elc_stream_set_inter_promote_flag(stream_id, CM_FALSE);
 
                 if (g_cb_status_nodify != NULL) {
                     int ret = g_cb_status_nodify(stream_id,
@@ -335,15 +389,15 @@ status_t elc_stream_get_quorum(uint32 stream_id, uint32* quorum)
     return CM_SUCCESS;
 }
 
-status_t elc_stream_increase_vote_count(uint32 stream_id)
+status_t elc_stream_increase_vote_count(uint32 stream_id, uint32 voting_weight)
 {
-    g_stream_list[stream_id].vote_count++;
+    g_stream_list[stream_id].vote_count += voting_weight;
     return CM_SUCCESS;
 }
 
-status_t elc_stream_increase_vote_no_count(uint32 stream_id)
+status_t elc_stream_increase_vote_no_count(uint32 stream_id, uint32 voting_weight)
 {
-    g_stream_list[stream_id].vote_no_count++;
+    g_stream_list[stream_id].vote_no_count += voting_weight;
     return CM_SUCCESS;
 }
 
@@ -353,25 +407,31 @@ void elc_stream_reset_vote_count(uint32 stream_id)
     g_stream_list[stream_id].vote_no_count = 0;
 }
 
-date_t elc_stream_get_timeout(uint32 stream_id)
+timespec_t elc_stream_get_timeout(uint32 stream_id)
 {
     return g_stream_list[stream_id].last_hb_time;
 }
 
-status_t elc_stream_set_timeout(uint32 stream_id, date_t date)
+status_t elc_stream_set_timeout(uint32 stream_id, timespec_t time)
 {
-    g_stream_list[stream_id].last_hb_time = date;
+    g_stream_list[stream_id].last_hb_time = time;
     return CM_SUCCESS;
 }
 
-date_t elc_stream_get_hb_ack_time(uint32 stream_id, uint32 node_id)
+bool32 elc_stream_is_future_hb(uint32 stream_id)
+{
+    uint64 hb_time = g_stream_list[stream_id].last_hb_time;
+    return (hb_time > cm_clock_now());
+}
+
+timespec_t  elc_stream_get_hb_ack_time(uint32 stream_id, uint32 node_id)
 {
     return g_stream_list[stream_id].last_hb_ack[node_id];
 }
 
-status_t elc_stream_set_hb_ack_time(uint32 stream_id, uint32 node_id, date_t date)
+status_t elc_stream_set_hb_ack_time(uint32 stream_id, uint32 node_id, timespec_t time)
 {
-    g_stream_list[stream_id].last_hb_ack[node_id] = date;
+    g_stream_list[stream_id].last_hb_ack[node_id] = time;
     return CM_SUCCESS;
 }
 
@@ -383,8 +443,24 @@ uint32 elc_stream_get_votefor(uint32 stream_id)
 status_t elc_stream_set_votefor(uint32 stream_id, uint32 votefor_id)
 {
     LOG_DEBUG_INF("[ELC]set votefor_id to %u", votefor_id);
+    if (votefor_id != CM_INVALID_NODE_ID && votefor_id != md_get_cur_node()) {
+        timespec_t now = cm_clock_now();
+        elc_stream_set_leader_start_time(stream_id, now);
+        LOG_DEBUG_INF("[ELC]set leader_start_time to %llu, votefor_id=%u", now, votefor_id);
+    }
     g_stream_list[stream_id].votefor_id = votefor_id;
     return stg_set_votedfor(stream_id, votefor_id);
+}
+
+uint32 elc_stream_get_old_leader(uint32 stream_id)
+{
+    return g_stream_list[stream_id].old_leader_id;
+}
+
+uint32 elc_stream_set_old_leader(uint32 stream_id, uint32 leader_id)
+{
+    g_stream_list[stream_id].old_leader_id = leader_id;
+    return CM_SUCCESS;
 }
 
 status_t elc_stream_vote_node_list(uint32 stream_id, uint64* inst_bits)
@@ -487,7 +563,7 @@ status_t elc_stream_refresh_hb_time(uint32 stream_id, uint64 leader_term, int32 
 
     LOG_DEBUG_INF("[ELC]refresh heartbeat, leader_term=%llu, leader_id=%u, current_term=%llu, current_id=%u",
         leader_term, leader_id, current_term, curr_node_id);
-    CM_RETURN_IFERR(elc_stream_set_timeout(stream_id, g_timer()->now));
+    CM_RETURN_IFERR(elc_stream_set_timeout(stream_id, cm_clock_now()));
     return CM_SUCCESS;
 }
 
@@ -502,7 +578,7 @@ status_t elc_stream_refresh_hb_ack_time(uint32 stream_id, uint64 leader_term, ui
         return CM_SUCCESS;
     }
 
-    CM_RETURN_IFERR(elc_stream_set_hb_ack_time(stream_id, node_id, g_timer()->now));
+    CM_RETURN_IFERR(elc_stream_set_hb_ack_time(stream_id, node_id, cm_clock_now()));
 
     return CM_SUCCESS;
 }
@@ -548,15 +624,97 @@ dcf_work_mode_t elc_stream_get_vote_node_work_mode(uint32 stream_id, uint32 node
     return g_stream_list[stream_id].vote_node_work_mode[node_id];
 }
 
-date_t elc_stream_get_last_md_rep_time(uint32 stream_id)
+timespec_t elc_stream_get_last_md_rep_time(uint32 stream_id)
 {
     return g_stream_list[stream_id].last_md_rep_time;
 }
 
-status_t elc_stream_set_last_md_rep_time(uint32 stream_id, date_t date)
+status_t elc_get_voting_weight(uint32 stream_id, uint32 node_id, uint32 *voting_weight)
 {
-    g_stream_list[stream_id].last_md_rep_time = date;
+    if (elc_stream_get_work_mode(stream_id) == WM_MINORITY) {
+        *voting_weight = CM_ELC_NORS_WEIGHT;
+    } else {
+        CM_RETURN_IFERR(md_get_stream_node_weight(stream_id, node_id, voting_weight));
+    }
     return CM_SUCCESS;
+}
+
+status_t elc_stream_set_last_md_rep_time(uint32 stream_id, timespec_t time)
+{
+    g_stream_list[stream_id].last_md_rep_time = time;
+    return CM_SUCCESS;
+}
+
+bool32 elc_stream_is_force_vote(uint32 stream_id)
+{
+    return g_stream_list[stream_id].force_vote;
+}
+
+void elc_stream_set_force_vote_flag(uint32 stream_id, bool32 is_force)
+{
+    g_stream_list[stream_id].force_vote = is_force;
+}
+
+bool32 elc_stream_get_inter_promote_flag(uint32 stream_id)
+{
+    return g_stream_list[stream_id].inter_promote_flag;
+}
+
+void elc_stream_set_inter_promote_flag(uint32 stream_id, bool32 flag)
+{
+    g_stream_list[stream_id].inter_promote_flag = flag;
+}
+
+timespec_t elc_stream_get_leader_start_time(uint32 stream_id)
+{
+    return g_stream_list[stream_id].leader_start_time;
+}
+
+void elc_stream_set_leader_start_time(uint32 stream_id, timespec_t time)
+{
+    g_stream_list[stream_id].leader_start_time = time;
+}
+
+bool32 elc_stream_can_switch_now(uint32 stream_id)
+{
+    timespec_t leader_start = g_stream_list[stream_id].leader_start_time;
+    timespec_t now = cm_clock_now();
+    uint64 interval = (now < leader_start) ? 0 : (uint64)(now - leader_start);
+    LOG_DEBUG_INF("[ELC]elc_switch_thresold now=%llu, leader_start=%llu, interval=%llu", now, leader_start, interval);
+    if (interval / MICROSECS_PER_SECOND >= elc_stream_get_elc_switch_thd_sec()) {
+        return CM_TRUE;
+    }
+    return CM_FALSE;
+}
+
+void elc_stream_set_leader_group(uint32 stream_id, uint32 leader_group)
+{
+    g_stream_list[stream_id].leader_group = leader_group;
+}
+
+uint32 elc_stream_get_leader_group(uint32 stream_id)
+{
+    return g_stream_list[stream_id].leader_group;
+}
+
+void elc_stream_set_my_group(uint32 stream_id, uint32 my_group)
+{
+    g_stream_list[stream_id].my_group = my_group;
+}
+
+uint32 elc_stream_get_my_group(uint32 stream_id)
+{
+    return g_stream_list[stream_id].my_group;
+}
+
+void elc_stream_set_priority(uint32 stream_id, uint64 priority)
+{
+    g_stream_list[stream_id].priority = priority;
+}
+
+uint64 elc_stream_get_priority(uint32 stream_id)
+{
+    return g_stream_list[stream_id].priority;
 }
 
 #ifdef __cplusplus

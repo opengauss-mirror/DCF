@@ -93,7 +93,7 @@ static inline status_t stream_set_applied_index(stream_t *stream, uint64 applied
     return CM_SUCCESS;
 }
 
-static inline uint64 stream_get_applied_index(stream_t *stream)
+static inline uint64 stream_get_applied_index(const stream_t *stream)
 {
     return stream->applied_index;
 }
@@ -120,12 +120,12 @@ static inline uint32 stream_get_votedfor(stream_t *stream)
 }
 /*=============================================================*/
 
-static inline uint64 stream_first_index(stream_t *stream)
+static inline uint64 stream_first_index(const stream_t *stream)
 {
     return stream->first_index;
 }
 
-static inline uint64 stream_last_index(stream_t *stream)
+static inline uint64 stream_last_index(const stream_t *stream)
 {
     return stream->last_index;
 }

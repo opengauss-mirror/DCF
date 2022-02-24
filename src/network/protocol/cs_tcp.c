@@ -271,7 +271,7 @@ int32 cs_socket_poll_check(struct pollfd *fds, uint32 nfds, int32 timeout)
 #endif
 }
 
-int32 cs_tcp_poll_check(tcp_link_t *link, uint32 wait_for, time_t end_time)
+int32 cs_tcp_poll_check(const tcp_link_t *link, uint32 wait_for, time_t end_time)
 {
     struct pollfd fd;
     int32 tv;
@@ -298,7 +298,7 @@ int32 cs_tcp_poll_check(tcp_link_t *link, uint32 wait_for, time_t end_time)
     return cs_socket_poll_check(&fd, 1, tv);
 }
 
-status_t cs_tcp_connect_wait(tcp_link_t *link, int32 error_no, time_t end_time)
+status_t cs_tcp_connect_wait(const tcp_link_t *link, int32 error_no, time_t end_time)
 {
     int32 ret = -1;
     int32 opt_val;
@@ -318,7 +318,7 @@ status_t cs_tcp_connect_wait(tcp_link_t *link, int32 error_no, time_t end_time)
     return CM_SUCCESS;
 }
 
-status_t cs_tcp_connect_core(tcp_link_t *link, socket_attr_t *sock_attr)
+status_t cs_tcp_connect_core(const tcp_link_t *link, socket_attr_t *sock_attr)
 {
     int32 ret;
     int32 error_no;
@@ -373,8 +373,6 @@ status_t cs_tcp_connect(const char *host, uint16 port, tcp_link_t *link, const c
     return CM_SUCCESS;
 
 error:
-    LOG_RUN_WAR("[MEC]cs_tcp_connect fail, err code %d, err msg %s.",
-        cm_get_error_code(), cm_get_errormsg(cm_get_error_code()));
     (void)cs_close_socket(link->sock);
     link->sock = CS_INVALID_SOCKET;
     link->closed = CM_TRUE;
@@ -469,7 +467,7 @@ status_t cs_tcp_wait(tcp_link_t *link, uint32 wait_for, int32 timeout, bool32 *r
     return CM_SUCCESS;
 }
 
-status_t cs_tcp_send(tcp_link_t *link, const char *buf, uint32 size, int32 *send_size)
+status_t cs_tcp_send(const tcp_link_t *link, const char *buf, uint32 size, int32 *send_size)
 {
     int code;
 
@@ -537,7 +535,7 @@ status_t cs_tcp_send_timed(tcp_link_t *link, const char *buf, uint32 size, uint3
 }
 
 /* cs_tcp_recv must following cs_tcp_wait */
-status_t cs_tcp_recv(tcp_link_t *link, char *buf, uint32 size, int32 *recv_size, uint32 *wait_event)
+status_t cs_tcp_recv(const tcp_link_t *link, char *buf, uint32 size, int32 *recv_size, uint32 *wait_event)
 {
     int32 rsize = 0;
     int code;

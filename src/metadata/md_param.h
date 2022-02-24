@@ -41,11 +41,13 @@ status_t verify_param_value(const char *param_name, const char *param_value,
     dcf_param_t *param_type, param_value_t *out_value);
 
 status_t verify_param_int_common(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
+status_t verify_param_int_auto_elc_prio_en(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
 status_t verify_param_int_agent_num(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
 status_t verify_param_int_reactor_num(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
 status_t verify_param_int_channel_num(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
 status_t verify_param_int_compress_level(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
 status_t verify_param_int_run_mode(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
+status_t verify_param_int_filename_format(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
 status_t verify_param_int_compress_algorithm(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
 status_t verify_param_int_append_thread_num(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
 status_t verify_param_size(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
@@ -62,6 +64,7 @@ status_t verify_param_mec_batch_size(dcf_param_t param_type, const char *param_v
 status_t verify_param_mec_fragment_size(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
 status_t verify_param_socket_timeout(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
 status_t verify_param_connect_timeout(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
+status_t verify_param_log_suppress_enable(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
 
 #ifdef __cplusplus
 }

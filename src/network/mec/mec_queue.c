@@ -265,12 +265,14 @@ void free_msgitem_pool(dtc_msgitem_pool_t *pool)
 
 #define PROC_DIFF_ENDIAN(head)                                    \
 do {                                                              \
+    (head)->batch_size = cs_reverse_int16((head)->batch_size);    \
     (head)->src_inst = cs_reverse_uint32((head)->src_inst);       \
     (head)->dst_inst = cs_reverse_uint32((head)->dst_inst);       \
     (head)->stream_id = cs_reverse_uint32((head)->stream_id);     \
     (head)->size = cs_reverse_uint32((head)->size);               \
     (head)->serial_no = cs_reverse_uint32((head)->serial_no);     \
-    (head)->batch_size = cs_reverse_int16((head)->batch_size);    \
+    (head)->frag_no = cs_reverse_uint32((head)->frag_no);         \
+    (head)->version = cs_reverse_uint32((head)->version);         \
 } while (0)
 
 static mec_perf_stat_t g_mec_perf_stat;
@@ -399,17 +401,12 @@ static status_t dtc_send_proc_core(mec_context_t *mec_ctx, dtc_msgqueue_t *temp_
         batch_size--;
     }
 
-    /* insert chksum in packet end, check when recvd */
-    mec_message_head_t *send_head = (first_head->batch_size > 1) ? first_head : head;
-    if (cs_send_fixed_size(pipe, (char *)&send_head->time1, MEC_CHKSUM_SIZE) != CM_SUCCESS) {
-        return CM_ERROR;
-    }
-
     CM_ASSERT(batch_size == 0);
     return CM_SUCCESS;
 }
 
-void dtc_send_proc(mec_context_t *mec_ctx, mec_profile_t *profile, dtc_msgqueue_t *temp_queue, mec_message_head_t *head)
+void dtc_send_proc(mec_context_t *mec_ctx, const mec_profile_t *profile, dtc_msgqueue_t *temp_queue,
+    mec_message_head_t *head)
 {
     uint8 channel_id = MEC_STREAM_TO_CHANNEL_ID(head->stream_id, profile->channel_num);
     mec_channel_t *channel = &mec_ctx->channels[head->dst_inst][channel_id];
@@ -452,8 +449,8 @@ void dtc_send_proc(mec_context_t *mec_ctx, mec_profile_t *profile, dtc_msgqueue_
     }
 
     cm_thread_unlock(&pipe->send_lock);
-    // current profile stat function relay on set __perf_stat__ , will remove it later
     set_time3(temp_queue, time2);
+    stat_record(SEND_PACK_SIZE, head->size);
     LOG_DEBUG_INF("[MEC]send message msg finish, len[%u], src inst[%d], dst inst[%d], "
         "cmd[%u], flag[%u], stream id[%u], serial no[%u], batch size[%u], frag no[%u]",
         head->size, head->src_inst, head->dst_inst, head->cmd,
@@ -938,7 +935,7 @@ void dtc_task_proc(thread_t *thread)
     LOG_RUN_INF("[MEC]work thread closed, tid:%lu, close:%u", thread->id, thread->closed);
 }
 
-status_t dtc_init_compress(mec_profile_t *profile, compress_t *compress, bool32 is_compress)
+status_t dtc_init_compress(const mec_profile_t *profile, compress_t *compress, bool32 is_compress)
 {
     if (profile->algorithm == COMPRESS_NONE) {
         return CM_SUCCESS;
@@ -1116,7 +1113,7 @@ void mec_free_channel_msg_queue(mq_context_t *mq_ctx)
     }
 }
 
-uint32 mec_get_que_count(mq_context_t *mq_ctx, msg_priv_t priv)
+uint32 mec_get_que_count(const mq_context_t *mq_ctx, msg_priv_t priv)
 {
     if (mq_ctx == NULL) {
         return 0;

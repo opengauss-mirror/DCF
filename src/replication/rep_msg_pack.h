@@ -29,10 +29,7 @@
 #include "stg_manager.h"
 #include "mec.h"
 
-#define REP_MAX_LOG_COUNT 128
-
 #define REP_MSG_VER 1
-
 
 #ifdef __cplusplus
 extern "C" {
@@ -63,7 +60,6 @@ typedef struct st_apendlog_req {
     uint64      cluster_min_apply_id;
     uint64      leader_last_index;
     uint64      log_count;
-    rep_log_t   logs[REP_MAX_LOG_COUNT];
 }rep_apendlog_req_t;
 
 typedef struct st_apendlog_ack {
@@ -76,20 +72,21 @@ typedef struct st_apendlog_ack {
     uint64      apply_id;
 }rep_apendlog_ack_t;
 
-
-status_t rep_encode_appendlog_req(mec_message_t* pack, rep_apendlog_req_t* appendlog_req);
-status_t rep_decode_appendlog_req(mec_message_t* pack, rep_apendlog_req_t* appendlog_req);
-status_t rep_encode_appendlog_ack(mec_message_t* pack, rep_apendlog_ack_t* appendlog_ack);
+status_t rep_encode_appendlog_head(mec_message_t* pack, const rep_apendlog_req_t* appendlog);
+status_t rep_decode_appendlog_head(mec_message_t* pack, rep_apendlog_req_t* appendlog);
+status_t rep_encode_one_log(mec_message_t* pack, uint32 pos, uint64 log_cnt, const log_entry_t* entry);
+status_t rep_decode_one_log(mec_message_t* pack, rep_log_t* log);
+status_t rep_encode_appendlog_ack(mec_message_t* pack, const rep_apendlog_ack_t* appendlog_ack);
 status_t rep_decode_appendlog_ack(mec_message_t* pack, rep_apendlog_ack_t* appendlog_ack);
 
 #define REP_APPEND_REQ_FMT "scn=%u,req_seq=%llu,ack_seq=%llu,src_node=%u,dest_node=%u," \
         "leader=%u,leader_term=%llu,leader_last_index=%llu,pre_log=(%llu,%llu)," \
         "leader_commit_log=(%llu,%llu),cluster_min_apply_id=%llu,log_count=%llu,log_begin=%llu"
-#define REP_APPEND_REQ_VAL(pack, req) (pack)->head->serial_no, (req)->head.req_seq, (req)->head.ack_seq, \
+#define REP_APPEND_REQ_VAL(pack, req, begin) (pack)->head->serial_no, (req)->head.req_seq, (req)->head.ack_seq, \
     (pack)->head->src_inst, (pack)->head->dst_inst, (req)->leader_node_id, (req)->leader_term, \
     (req)->leader_last_index, (req)->pre_log.term, (req)->pre_log.index, (req)->leader_commit_log.term, \
     (req)->leader_commit_log.index, (req)->cluster_min_apply_id, \
-    (req)->log_count, ((req)->log_count>0 ? (req)->logs[0].log_id.index : 0)
+    (req)->log_count, ((req)->log_count > 0 ? (begin) : 0)
 
 #define REP_APPEND_ACK_FMT "scn=%u,req_seq=%llu,ack_seq=%llu,src_node=%u,dest_node=%u,follower_term=%llu," \
         "ret_code=%d,pre_log=(%llu,%llu),mismatch_log=(%llu,%llu),follower_accept_log=(%llu,%llu)," \

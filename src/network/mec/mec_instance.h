@@ -59,7 +59,7 @@ agent_pool_t* get_mec_agent(msg_priv_t priv);
 
 status_t mec_extend_pack(mec_message_t *pack);
 status_t mec_send_fragment(mec_message_t *pack, const char *data, uint32 size);
-bool32 mec_check_last(uint64 inst_bits[INSTS_BIT_SZ], uint32 inst_id);
+bool32 mec_check_last(const uint64 inst_bits[INSTS_BIT_SZ], uint32 inst_id);
 status_t mec_scale_out(uint32 inst_id, uint32 channel_id);
 void compress_ctx_destructor(void *data);
 status_t init_mec_profile(mec_profile_t *profile);
@@ -73,7 +73,7 @@ void mec_stop_lsnr();
 void mec_destory_channels();
 void mec_deinit_ssl();
 status_t mec_put_msg_queue(const void *msg, bool32 is_send);
-void get_broadcast_insts(uint64 inst_bits[INSTS_BIT_SZ], char *buffer, uint32 buff_size);
+void get_broadcast_insts(const uint64 inst_bits[INSTS_BIT_SZ], char *buffer, uint32 buff_size);
 
 #ifdef __cplusplus
 }

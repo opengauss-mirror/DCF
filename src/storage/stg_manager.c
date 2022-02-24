@@ -163,10 +163,10 @@ static void stg_timed_task(thread_t *thread)
 
 static inline status_t create_timed_task(thread_t *timed_thread)
 {
-    return cm_create_thread(stg_timed_task, THREAD_STACK_SIZE, NULL, timed_thread);
+    return cm_create_thread(stg_timed_task, 0, NULL, timed_thread);
 }
 
-static inline status_t init_stream_instance(uint32 *ids, uint32 count, char *data_path)
+static inline status_t init_stream_instance(const uint32 *ids, uint32 count, char *data_path)
 {
     for (uint32 i = 0; i < count; ++i) {
         CM_RETURN_IFERR(init_stream(ids[i], data_path, &g_streams[ids[i]]));
@@ -174,23 +174,23 @@ static inline status_t init_stream_instance(uint32 *ids, uint32 count, char *dat
     return CM_SUCCESS;
 }
 
-static inline void destroy_stream_instance(uint32 *ids, uint32 count)
+static inline void destroy_stream_instance(const uint32 *ids, uint32 count)
 {
     for (uint32 i = 0; i < count; ++i) {
         destroy_stream(&g_streams[ids[i]]);
     }
 }
 
-static inline status_t create_stream_disk_thread(uint32 *ids, uint32 count)
+static inline status_t create_stream_disk_thread(const uint32 *ids, uint32 count)
 {
     for (uint32 i = 0; i < count; ++i) {
-        CM_RETURN_IFERR(cm_create_thread(disk_thread_entry, THREAD_STACK_SIZE,
+        CM_RETURN_IFERR(cm_create_thread(disk_thread_entry, 0,
             &g_streams[ids[i]], &g_disk_thread[ids[i]]));
     }
     return CM_SUCCESS;
 }
 
-static inline void destroy_stream_disk_thread(uint32 *ids, uint32 count)
+static inline void destroy_stream_disk_thread(const uint32 *ids, uint32 count)
 {
     for (uint32 i = 0; i < count; ++i) {
         cm_close_thread(&g_disk_thread[ids[i]]);
@@ -200,20 +200,20 @@ static inline void destroy_stream_disk_thread(uint32 *ids, uint32 count)
 static inline status_t create_stream_recycle_thread(uint32 *ids, uint32 count)
 {
     for (uint32 i = 0; i < count; ++i) {
-        CM_RETURN_IFERR(cm_create_thread(recycle_thread_entry, THREAD_STACK_SIZE,
+        CM_RETURN_IFERR(cm_create_thread(recycle_thread_entry, 0,
             &g_streams[ids[i]], &g_recycle_thread[ids[i]]));
     }
     return CM_SUCCESS;
 }
 
-static inline void destroy_stream_recycle_thread(uint32 *ids, uint32 count)
+static inline void destroy_stream_recycle_thread(const uint32 *ids, uint32 count)
 {
     for (uint32 i = 0; i < count; ++i) {
         cm_close_thread(&g_recycle_thread[ids[i]]);
     }
 }
 
-static status_t load_stream_instance(uint32 *ids, uint32 count)
+static status_t load_stream_instance(const uint32 *ids, uint32 count)
 {
     uint32   loop = 0;
     thread_t thread[CM_MAX_STREAM_COUNT];
@@ -412,7 +412,10 @@ int64 stg_get_total_mem_used()
             continue;
         }
         stream_t *stream = &g_streams[stream_id[i]];
+        // mem of stream
         total_mem += stream->mem_pool.used_size;
+        // mem of storage
+        total_mem += stream->log_storage.mem_pool.used_size;
     }
 
     return total_mem;

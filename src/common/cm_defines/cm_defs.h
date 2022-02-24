@@ -56,7 +56,7 @@ extern "C" {
 #define SIZE_G(n) (1024 * (uint64)SIZE_M(n))
 #define SIZE_T(n) (1024 * (uint64)SIZE_G(n))
 
-#define CM_DFLT_THREAD_STACK_SIZE     SIZE_M(2)
+#define CM_DFLT_THREAD_STACK_SIZE     SIZE_M(1)
 
 
 /* invalid id */
@@ -404,9 +404,12 @@ static inline uint64 cm_get_prev_2power(uint64 size)
 #define KEY_CTRL_U              21L
 #define KEY_CTRL_W              23L
 
+#define CM_1X_FIXED 1
 #define CM_2X_FIXED 2
 #define CM_3X_FIXED 3
 #define CM_10X_FIXED 10
+#define CM_100X_FIXED 100
+#define CM_1000X_FIXED 1000
 
 #define CM_SLEEP_1_FIXED 1
 #define CM_SLEEP_5_FIXED 5

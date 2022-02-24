@@ -36,6 +36,7 @@
 #include "replication.h"
 #include "rep_common.h"
 #include "elc_stream.h"
+#include "elc_status_check.h"
 #include "util_perf_stat.h"
 #include "cm_ip.h"
 #include "cJSON.h"
@@ -58,6 +59,7 @@ typedef enum en_block_ack {
 typedef struct st_block_info {
     uint32 block_time_ms;
     block_ack_t ack;
+    uint64 leader_last_index;
     thread_t thread;
     cm_event_t event;
 } block_info_t;
@@ -65,6 +67,7 @@ typedef struct st_block_info {
 typedef struct st_dcf_status {
     node_status_t status;
     block_info_t block;
+    atomic32_t writing_cnt; // dcf writing count
     latch_t latch;
 } dcf_status_t;
 
@@ -76,7 +79,7 @@ typedef struct st_dcf_exception_report {
     bool32          exception_init_flag;
 } dcf_exception_report_t;
 
-static dcf_status_t g_node_status[CM_MAX_STREAM_COUNT] = {{0}};
+static dcf_status_t g_node_status[CM_MAX_STREAM_COUNT] = {0};
 
 static latch_t    g_dcf_latch = {0};
 static bool32     g_dcf_inited = CM_FALSE;
@@ -85,6 +88,17 @@ static usr_cb_msg_proc_t            g_cb_send_msg_notify = NULL;
 static usr_cb_exception_notify_t    g_cb_exception_notify = NULL;
 static dcf_exception_report_t       g_dcf_exception;
 static bool32    g_node_inited = CM_FALSE;
+
+#define MAX_PARALLEL_MAX_NUM 256
+typedef struct st_dcf_parallel_msg {
+    spinlock_t   lock;
+    uint32       cursor;
+    uint8        req_id_status[MAX_PARALLEL_MAX_NUM];
+    atomic_t     ack_result[MAX_PARALLEL_MAX_NUM];
+    cm_event_t   event[MAX_PARALLEL_MAX_NUM];
+} dcf_parallel_msg_t;
+static dcf_parallel_msg_t  g_universal_write_info = {0};
+static dcf_parallel_msg_t  g_consensus_hc_info = {0};
 
 status_t set_node_status(uint32 stream_id, node_status_t status, uint32 block_time_ms)
 {
@@ -112,6 +126,13 @@ static inline node_status_t get_node_status(uint32 stream_id)
     return status;
 }
 
+void clear_node_block_status(uint32 stream_id)
+{
+    if (get_node_status(stream_id) == NODE_BLOCKED) {
+        (void)set_node_status(stream_id, NODE_NORMAL, 0);
+    }
+}
+
 static inline uint32 get_block_time(uint32 stream_id)
 {
     dcf_status_t *node_status = &g_node_status[stream_id];
@@ -121,10 +142,11 @@ static inline uint32 get_block_time(uint32 stream_id)
     return block_time;
 }
 
-static inline void set_block_ack(uint32 stream_id, block_ack_t ack)
+static inline void set_block_ack(uint32 stream_id, block_ack_t ack, uint64 last_index)
 {
     dcf_status_t *node_status = &g_node_status[stream_id];
     cm_latch_x(&node_status->latch, 0, NULL);
+    node_status->block.leader_last_index = last_index;
     node_status->block.ack = ack;
     cm_unlatch(&node_status->latch, NULL);
 }
@@ -136,6 +158,15 @@ static inline block_ack_t get_block_ack(uint32 stream_id)
     block_ack_t ack = node_status->block.ack;
     cm_unlatch(&node_status->latch, NULL);
     return ack;
+}
+
+static inline uint64 get_block_last_index(uint32 stream_id)
+{
+    dcf_status_t *node_status = &g_node_status[stream_id];
+    cm_latch_s(&node_status->latch, 0, CM_FALSE, NULL);
+    uint64 last_index = node_status->block.leader_last_index;
+    cm_unlatch(&node_status->latch, NULL);
+    return last_index;
 }
 
 status_t block_node_req(uint32 stream_id, uint32 node_id, uint32 block_time_ms)
@@ -156,15 +187,28 @@ status_t block_node_req(uint32 stream_id, uint32 node_id, uint32 block_time_ms)
 
 status_t block_node_ack(uint32 stream_id, unsigned int node_id, block_ack_t ack)
 {
+    if (ack == SUCCESS_ACK) {
+        timespec_t begin = cm_clock_now();
+        do {
+            cm_sleep(CM_SLEEP_10_FIXED);
+            if ((cm_clock_now() - begin) > MICROSECS_PER_SECOND) {
+                LOG_RUN_ERR("wait dcf write timeout, writing_cnt=%u.", g_node_status[stream_id].writing_cnt);
+                break;
+            }
+        } while (g_node_status[stream_id].writing_cnt != 0);
+    }
+
     mec_message_t pack;
     uint32 src_node = md_get_cur_node();
     CM_RETURN_IFERR(mec_alloc_pack(&pack, MEC_CMD_BLOCK_NODE_RPC_ACK, src_node, node_id, stream_id));
-    if (mec_put_int32(&pack, ack) != CM_SUCCESS) {
+    uint64 last_index = stg_last_log_id(stream_id).index;
+    if (mec_put_int32(&pack, ack) != CM_SUCCESS || mec_put_int64(&pack, last_index) != CM_SUCCESS) {
         mec_release_pack(&pack);
         LOG_DEBUG_ERR("block node ack, encode fail.");
         return CM_ERROR;
     }
-    LOG_DEBUG_INF("send blockack: stream=%u,src=%u,dst=%u,ack=%d.", stream_id, src_node, node_id, ack);
+    LOG_DEBUG_INF("send blockack: stream=%u,src=%u,dst=%u,ack=%d,last_index=%llu.",
+        stream_id, src_node, node_id, ack, last_index);
     status_t ret = mec_send_data(&pack);
     mec_release_pack(&pack);
     return ret;
@@ -200,10 +244,12 @@ status_t block_node_ack_proc(mec_message_t *pack)
     uint32 stream_id = pack->head->stream_id;
     uint32 ack;
     CM_RETURN_IFERR(mec_get_int32(pack, (int32*)&ack));
-    LOG_DEBUG_INF("recv blockack: stream_id=%u, ack=%d.", stream_id, ack);
+    uint64 last_index;
+    CM_RETURN_IFERR(mec_get_int64(pack, (int64*)&last_index));
+    LOG_DEBUG_INF("recv blockack: stream_id=%u, ack=%u, last_index=%llu.", stream_id, ack, last_index);
 
     ack = (ack == SUCCESS_ACK) ? SUCCESS_ACK : ERROR_ACK;
-    set_block_ack(stream_id, ack);
+    set_block_ack(stream_id, ack, last_index);
     return CM_SUCCESS;
 }
 
@@ -219,10 +265,10 @@ static void block_thread_entry(thread_t *thread)
         (void)cm_event_timedwait(block_event, CM_SLEEP_500_FIXED);
 
         if (get_node_status(stream_id) == NODE_BLOCKED) {
-            date_t begin = g_timer()->now;
+            timespec_t begin = cm_clock_now();
             uint32 block_time_ms = get_block_time(stream_id);
-            while (((uint64)(g_timer()->now - begin)) / MICROSECS_PER_MILLISEC < block_time_ms) {
-                cm_sleep(1);
+            while (((uint64)(cm_clock_now() - begin)) / MICROSECS_PER_MILLISEC < block_time_ms) {
+                cm_sleep(CM_SLEEP_1_FIXED);
             }
             (void)set_node_status(stream_id, NODE_NORMAL, 0);
         }
@@ -286,7 +332,11 @@ status_t common_msg_proc(mec_message_t *pack)
     return ret;
 }
 
-status_t change_role_req_proc(mec_message_t *pack);
+status_t change_member_req_proc(mec_message_t *pack);
+status_t universal_write_req_proc(mec_message_t *pack);
+status_t universal_write_ack_proc(mec_message_t *pack);
+status_t dcf_get_commit_index_req_proc(mec_message_t *pack);
+status_t dcf_get_commit_index_ack_proc(mec_message_t *pack);
 
 status_t init_node_status()
 {
@@ -297,6 +347,12 @@ status_t init_node_status()
         LOG_RUN_INF("init_node_status already sucessful");
         return CM_SUCCESS;
     }
+
+    for (uint32 i = 0; i < MAX_PARALLEL_MAX_NUM; i++) {
+        CM_RETURN_IFERR(cm_event_init(&g_universal_write_info.event[i]));
+        CM_RETURN_IFERR(cm_event_init(&g_consensus_hc_info.event[i]));
+    }
+
     if (md_get_stream_list(streams, &stream_count) != CM_SUCCESS) {
         LOG_DEBUG_ERR("md_get_stream_list failed");
         return CM_ERROR;
@@ -315,7 +371,11 @@ status_t init_node_status()
     register_msg_process(MEC_CMD_BLOCK_NODE_RPC_REQ, block_node_req_proc, PRIV_HIGH);
     register_msg_process(MEC_CMD_BLOCK_NODE_RPC_ACK, block_node_ack_proc, PRIV_HIGH);
     register_msg_process(MEC_CMD_SEND_COMMON_MSG, common_msg_proc, PRIV_LOW);
-    register_msg_process(MEC_CMD_CHANGE_ROLE_RPC_REQ, change_role_req_proc, PRIV_HIGH);
+    register_msg_process(MEC_CMD_CHANGE_MEMBER_RPC_REQ, change_member_req_proc, PRIV_HIGH);
+    register_msg_process(MEC_CMD_UNIVERSAL_WRITE_REQ, universal_write_req_proc, PRIV_LOW);
+    register_msg_process(MEC_CMD_UNIVERSAL_WRITE_ACK, universal_write_ack_proc, PRIV_LOW);
+    register_msg_process(MEC_CMD_GET_COMMIT_INDEX_REQ, dcf_get_commit_index_req_proc, PRIV_LOW);
+    register_msg_process(MEC_CMD_GET_COMMIT_INDEX_ACK, dcf_get_commit_index_ack_proc, PRIV_LOW);
     g_node_inited = CM_TRUE;
 
     return CM_SUCCESS;
@@ -345,6 +405,11 @@ static inline void deinit_node_status()
         cm_event_destory(&node_status->block.event);
     }
 
+    for (uint32 i = 0; i < MAX_PARALLEL_MAX_NUM; i++) {
+        cm_event_destory(&g_universal_write_info.event[i]);
+        cm_event_destory(&g_consensus_hc_info.event[i]);
+    }
+
     MEMS_RETVOID_IFERR(memset_sp(g_node_status, sizeof(dcf_status_t) * CM_MAX_STREAM_COUNT, 0,
         sizeof(dcf_status_t) * CM_MAX_STREAM_COUNT));
     g_node_inited = CM_FALSE;
@@ -365,11 +430,11 @@ static inline void wait_if_node_blocked(uint32 stream_id)
 {
     node_status_t status = get_node_status(stream_id);
     if (status == NODE_BLOCKED) {
-        date_t begin = g_timer()->now;
+        timespec_t begin = cm_clock_now();
         while (status == NODE_BLOCKED) {
-            if ((g_timer()->now - begin) > MICROSECS_PER_SECOND) {
+            if ((cm_clock_now() - begin) > MICROSECS_PER_SECOND) {
                 LOG_DEBUG_WAR("node is blocked now, waiting...");
-                begin = g_timer()->now;
+                begin = cm_clock_now();
             }
             cm_sleep(1);
             status = get_node_status(stream_id);
@@ -396,6 +461,9 @@ status_t init_logger_param(log_param_t *log_param)
     PRTS_RETURN_IFERR(snprintf_s(log_param->instance_name, CM_MAX_NAME_LEN, CM_MAX_NAME_LEN - 1,
         "%s", param_value.instance_name));
 
+    CM_RETURN_IFERR(md_get_param(DCF_PARAM_LOG_FILENAME_FORMAT, &param_value));
+    log_param->log_filename_format = param_value.value_log_filename_format;
+
     CM_RETURN_IFERR(md_get_param(DCF_PARAM_LOG_LEVEL, &param_value));
     log_param->log_level = param_value.value_loglevel;
 
@@ -410,6 +478,9 @@ status_t init_logger_param(log_param_t *log_param)
 
     CM_RETURN_IFERR(md_get_param(DCF_PARAM_LOG_PATH_PERMISSION, &param_value));
     cm_log_set_path_permissions((uint16)param_value.value_log_path_permission);
+
+    CM_RETURN_IFERR(md_get_param(DCF_PARAM_LOG_SUPPRESS_ENABLE, &param_value));
+    log_param->log_suppress_enable = param_value.log_suppress_enable;
 
     return CM_SUCCESS;
 }
@@ -438,6 +509,9 @@ int64 cb_get_value_impl(stat_item_id_t item_id)
             break;
         case MEC_RECV_MEM:
             value = mec_get_recv_mem_capacity(PRIV_LOW);
+            break;
+        case MEC_BUDDY_MEM:
+            value = get_mem_pool()->used_size;
             break;
         default:
             break;
@@ -471,6 +545,8 @@ status_t register_stat_items()
     CM_RETURN_IFERR(cm_reg_stat_item(HB_SEND_COUNT, "HBSendCount", UNIT_DEFAULT, STAT_INDICATOR_ACC, NULL));
     CM_RETURN_IFERR(cm_reg_stat_item(HB_RECV_COUNT, "HBRecvCount", UNIT_DEFAULT, STAT_INDICATOR_ACC, NULL));
     CM_RETURN_IFERR(cm_reg_stat_item(HB_RTT, "HBRTT", UNIT_MS, STAT_INDICATOR_AVG, NULL));
+    CM_RETURN_IFERR(
+        cm_reg_stat_item(MEC_BUDDY_MEM, "MecBuddyMem", UNIT_MB, STAT_INDICATOR_ACC, cb_get_value_impl));
     return CM_SUCCESS;
 }
 
@@ -540,7 +616,11 @@ int dcf_set_param(const char* param_name, const char* param_value)
     dcf_param_t param_type;
     param_value_t out_value;
 
-    LOG_OPER("dcf set param, param_name=%s param_value=%s", param_name, param_value);
+    if (cm_str_equal(param_name, "SSL_PWD_PLAINTEXT")) {
+        LOG_OPER("dcf set param, param_name=%s param_value=%s", param_name, "***");
+    } else {
+        LOG_OPER("dcf set param, param_name=%s param_value=%s", param_name, param_value);
+    }
 
     CM_RETURN_IFERR(md_verify_param(param_name, param_value, &param_type, &out_value));
     return md_set_param(param_type, &out_value);
@@ -551,9 +631,6 @@ int dcf_get_param(const char *param_name, char *param_value, unsigned int size)
     CM_CHECK_NULL_PTR(param_name);
     cm_reset_error();
     init_dcf_errno_desc();
-
-    LOG_OPER("dcf get param, param_name=%s", param_name);
-
     CM_RETURN_IFERR(md_get_param_by_name(param_name, param_value, size));
     return CM_SUCCESS;
 }
@@ -804,7 +881,9 @@ int dcf_write(unsigned int stream_id, const char *buffer, unsigned int length,
 
     wait_if_node_blocked(stream_id);
 
+    (void)cm_atomic32_inc(&g_node_status[stream_id].writing_cnt);
     status_t ret = rep_write(stream_id, buffer, length, key, ENTRY_TYPE_LOG, &index_in);
+    (void)cm_atomic32_dec(&g_node_status[stream_id].writing_cnt);
     if (ret != CM_SUCCESS) {
         LOG_DEBUG_ERR("[DCF]rep_write failed, error code=%d key=%llu", ret, key);
         return CM_ERROR;
@@ -882,26 +961,42 @@ int dcf_stop()
 
 static status_t append_local_node(unsigned int stream_id, cJSON *obj)
 {
-    uint32 current_node_id = md_get_cur_node();
-    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "local_node_id", current_node_id));
+    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "local_node_id", md_get_cur_node()));
     dcf_role_t role = elc_get_node_role(stream_id);
     CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddStringToObject(obj, "role", md_get_rolename_by_type(role)));
 
-    uint64 term = elc_get_current_term(stream_id);
-    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "term", term));
-
-    param_run_mode_t run_mode = elc_stream_get_run_mode();
-    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "run_mode", run_mode));
-
-    dcf_work_mode_t work_mode = elc_get_work_mode(stream_id);
-    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "work_mode", work_mode));
+    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "term", elc_get_current_term(stream_id)));
+    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "run_mode", elc_stream_get_run_mode()));
+    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "work_mode", elc_get_work_mode(stream_id)));
 
     param_value_t elc_timeout;
+    param_value_t auto_elc_pri_en;
     param_value_t hb_interval;
+    param_value_t elc_switch_thd;
     CM_RETURN_IFERR(md_get_param(DCF_PARAM_ELECTION_TIMEOUT, &elc_timeout));
+    CM_RETURN_IFERR(md_get_param(DCF_PARAM_AUTO_ELC_PRIORITY_EN, &auto_elc_pri_en));
     CM_RETURN_IFERR(md_get_param(DCF_PARAM_HEARTBEAT_INTERVAL, &hb_interval));
+    CM_RETURN_IFERR(md_get_param(DCF_PARAM_ELECTION_SWITCH_THRESHOLD, &elc_switch_thd));
     CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "hb_interval", hb_interval.value_hb_interval));
     CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "elc_timeout", elc_timeout.value_elc_timeout));
+    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "auto_elc_pri_en",
+        auto_elc_pri_en.value_auto_elc_priority_en));
+    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "elc_switch_thd",
+        elc_switch_thd.value_elc_switch_thd));
+
+    elc_stream_lock_s(stream_id);
+    uint32 my_group = elc_stream_get_my_group(stream_id);
+    uint64 my_prio = elc_stream_get_priority(stream_id);
+    uint32 leader_group = elc_stream_get_leader_group(stream_id);
+    elc_stream_unlock(stream_id);
+    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "group", my_group));
+    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "priority", my_prio));
+    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "leader_group", leader_group));
+
+    bool32 is_in_major = elc_is_in_majority(stream_id);
+    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "is_in_major", is_in_major));
+    uint32 best_prio_node = elc_get_rcv_best_priority_node(stream_id);
+    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "best_prio_node", best_prio_node));
 
     uint64 index = stg_get_applied_index(stream_id);
     CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "applied_index", index));
@@ -920,21 +1015,44 @@ static status_t append_local_node(unsigned int stream_id, cJSON *obj)
     return CM_SUCCESS;
 }
 
+static bool32 is_node_leader(uint32 stream_id, uint32 node_id)
+{
+    if (node_id == CM_INVALID_NODE_ID) {
+        return CM_FALSE;
+    }
+
+    uint32 votefor = elc_get_votefor(stream_id);
+    uint32 cur_node = md_get_cur_node();
+    param_value_t value;
+    dcf_work_mode_t work_mode = elc_get_work_mode(stream_id);
+    uint32 old_leader = elc_get_old_leader(stream_id);
+    bool32 cond = (node_id == votefor);
+    if (md_get_param(DCF_PARAM_RUN_MODE, &value) != CM_SUCCESS) {
+        return CM_FALSE;
+    }
+    if (cur_node == node_id) {
+        return (cond && (elc_get_node_role(stream_id) == DCF_ROLE_LEADER));
+    }
+    if (value.value_mode == ELECTION_AUTO && work_mode == WM_NORMAL) {
+        cond = cond && (node_id == old_leader) && mec_is_ready(stream_id, node_id, PRIV_HIGH);
+    }
+    return cond;
+}
+
 static status_t append_leader_node(unsigned int stream_id, cJSON *obj)
 {
     uint32 node_id = elc_get_votefor(stream_id);
-    if (node_id == CM_INVALID_NODE_ID) {
+    if (!is_node_leader(stream_id, node_id)) {
         CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNullToObject(obj, "leader_id"));
         CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNullToObject(obj, "leader_ip"));
         CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNullToObject(obj, "leader_port"));
-    } else {
-        dcf_node_t node_item;
-        CM_RETURN_IFERR(md_get_node(node_id, &node_item));
-        CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "leader_id", node_item.node_id));
-        CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddStringToObject(obj, "leader_ip", node_item.ip));
-        CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "leader_port", node_item.port));
+        return CM_SUCCESS;
     }
-
+    dcf_node_t node_item;
+    CM_RETURN_IFERR(md_get_node(node_id, &node_item));
+    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "leader_id", node_item.node_id));
+    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddStringToObject(obj, "leader_ip", node_item.ip));
+    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "leader_port", node_item.port));
     return CM_SUCCESS;
 }
 
@@ -954,7 +1072,7 @@ static status_t append_stream_node_detail(unsigned int stream_id, cJSON *obj)
         CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(node, "node_id", node_item.node_id));
         CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddStringToObject(node, "ip", node_item.ip));
         CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(node, "port", node_item.port));
-        if (node_id == elc_get_votefor(stream_id)) {
+        if (is_node_leader(stream_id, node_id)) {
             CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddStringToObject(node, "role",
                 md_get_rolename_by_type(DCF_ROLE_LEADER)));
         } else {
@@ -1177,6 +1295,9 @@ status_t add_member_request(unsigned int stream_id, unsigned int node_id, const 
     MEMS_RETURN_IFERR(strncpy_s(node.ip, CM_MAX_IP_LEN, ip, strlen(ip) + 1));
     node.port = port;
     node.default_role = role;
+    node.voting_weight = CM_ELC_NORS_WEIGHT;
+    node.group = CM_DEFAULT_GROUP_ID;
+    node.priority = CM_DEFAULT_ELC_PRIORITY;
 
     CM_RETURN_IFERR(md_add_stream_member(stream_id, &node));
     uint32 size;
@@ -1186,7 +1307,7 @@ status_t add_member_request(unsigned int stream_id, unsigned int node_id, const 
         return CM_ERROR;
     }
     CM_RETURN_IFERR_EX(md_to_string(md_buf, CM_METADATA_DEF_MAX_LEN, &size), CM_FREE_PTR(md_buf));
-    CM_RETURN_IFERR_EX(rep_write(stream_id, md_buf, size, 0, ENTRY_TYPE_CONF, NULL), CM_FREE_PTR(md_buf));
+    CM_RETURN_IFERR_EX(rep_write(stream_id, md_buf, size, OP_FLAG_ADD, ENTRY_TYPE_CONF, NULL), CM_FREE_PTR(md_buf));
     CM_FREE_PTR(md_buf);
     return CM_SUCCESS;
 }
@@ -1196,13 +1317,13 @@ status_t add_member_request(unsigned int stream_id, unsigned int node_id, const 
 status_t wait_process(unsigned int wait_timeout_ms)
 {
     uint32 wait_time = (wait_timeout_ms < MIN_SLEEP_TIME) ? MIN_SLEEP_TIME : wait_timeout_ms;
-    date_t begin = g_timer()->now;
+    timespec_t begin = cm_clock_now();
     do {
         cm_sleep(SLEEP_TIME_PER);
         if (md_get_status() == META_NORMAL) {
             return CM_SUCCESS;
         }
-    } while (((uint64)(g_timer()->now - begin)) / MICROSECS_PER_MILLISEC < wait_time);
+    } while (((uint64)(cm_clock_now() - begin)) / MICROSECS_PER_MILLISEC < wait_time);
 
     if (md_get_status() == META_NORMAL) {
         return CM_SUCCESS;
@@ -1252,7 +1373,7 @@ status_t remove_member_request(unsigned int stream_id, unsigned int node_id)
         return CM_ERROR;
     }
     CM_RETURN_IFERR_EX(md_to_string(md_buf, CM_METADATA_DEF_MAX_LEN, &size), CM_FREE_PTR(md_buf));
-    CM_RETURN_IFERR_EX(rep_write(stream_id, md_buf, size, 0, ENTRY_TYPE_CONF, NULL), CM_FREE_PTR(md_buf));
+    CM_RETURN_IFERR_EX(rep_write(stream_id, md_buf, size, OP_FLAG_REMOVE, ENTRY_TYPE_CONF, NULL), CM_FREE_PTR(md_buf));
     CM_FREE_PTR(md_buf);
     return CM_SUCCESS;
 }
@@ -1277,9 +1398,9 @@ int dcf_remove_member(unsigned int stream_id, unsigned int node_id, unsigned int
     return wait_process(wait_timeout_ms);
 }
 
-status_t change_member_role_request(unsigned int stream_id, unsigned int node_id, unsigned int role)
+status_t change_member_request(uint32 stream_id, uint32 node_id, dcf_change_member_t *change_info)
 {
-    CM_RETURN_IFERR(md_change_stream_member_role(stream_id, node_id, role));
+    CM_RETURN_IFERR(md_change_stream_member(stream_id, node_id, change_info));
     uint32 size;
     char *md_buf = (char *)malloc(CM_METADATA_DEF_MAX_LEN);
     if (md_buf == NULL) {
@@ -1287,39 +1408,60 @@ status_t change_member_role_request(unsigned int stream_id, unsigned int node_id
         return CM_ERROR;
     }
     CM_RETURN_IFERR_EX(md_to_string(md_buf, CM_METADATA_DEF_MAX_LEN, &size), CM_FREE_PTR(md_buf));
-    CM_RETURN_IFERR_EX(rep_write(stream_id, md_buf, size, 0, ENTRY_TYPE_CONF, NULL), CM_FREE_PTR(md_buf));
+    CM_RETURN_IFERR_EX(rep_write(stream_id, md_buf, size, change_info->op_type,
+        ENTRY_TYPE_CONF, NULL), CM_FREE_PTR(md_buf));
     CM_FREE_PTR(md_buf);
     return CM_SUCCESS;
 }
 
-status_t change_role_req(uint32 stream_id, uint32 leader_id, dcf_role_t new_role)
+status_t decode_change_member_req(mec_message_t *pack, dcf_change_member_t *change_info)
+{
+    CM_RETURN_IFERR(mec_get_int32(pack, (int32*)&change_info->op_type));
+    CM_RETURN_IFERR(mec_get_int32(pack, (int32*)&change_info->new_role));
+    CM_RETURN_IFERR(mec_get_int32(pack, (int32*)&change_info->new_group));
+    CM_RETURN_IFERR(mec_get_int64(pack, (int64*)&change_info->new_priority));
+    return CM_SUCCESS;
+}
+
+status_t encode_change_member_req(mec_message_t *pack, const dcf_change_member_t *change_info)
+{
+    CM_RETURN_IFERR(mec_put_int32(pack, change_info->op_type));
+    CM_RETURN_IFERR(mec_put_int32(pack, change_info->new_role));
+    CM_RETURN_IFERR(mec_put_int32(pack, change_info->new_group));
+    CM_RETURN_IFERR(mec_put_int64(pack, change_info->new_priority));
+    return CM_SUCCESS;
+}
+
+status_t change_member_req(uint32 stream_id, uint32 leader_id, dcf_change_member_t *change_info)
 {
     mec_message_t pack;
     uint32 src_node = md_get_cur_node();
-    if (mec_alloc_pack(&pack, MEC_CMD_CHANGE_ROLE_RPC_REQ, src_node, leader_id, stream_id) != CM_SUCCESS) {
-        LOG_DEBUG_ERR("change_role_req:mec_alloc_pack failed.stream_id=%u,leader_id=%u,src_node=%u",
+    if (mec_alloc_pack(&pack, MEC_CMD_CHANGE_MEMBER_RPC_REQ, src_node, leader_id, stream_id) != CM_SUCCESS) {
+        LOG_DEBUG_ERR("change_member_req:mec_alloc_pack failed.stream_id=%u,leader_id=%u,src_node=%u",
             stream_id, leader_id, src_node);
         return CM_ERROR;
     }
-    if (mec_put_int32(&pack, new_role) != CM_SUCCESS) {
+
+    if (encode_change_member_req(&pack, change_info) != CM_SUCCESS) {
         mec_release_pack(&pack);
-        LOG_DEBUG_ERR("change_role_req, encode fail.");
+        LOG_DEBUG_ERR("change_member_req, encode fail.");
         return CM_ERROR;
     }
-    LOG_DEBUG_INF("send change_role_req: stream=%u,src=%u,leader_id=%u,new_role=%u.",
-        stream_id, src_node, leader_id, new_role);
+
+    LOG_DEBUG_INF("send change_member_req: stream=%u,src=%u,leader_id=%u,op_type=%u.",
+        stream_id, src_node, leader_id, change_info->op_type);
     status_t ret = mec_send_data(&pack);
     mec_release_pack(&pack);
     return ret;
 }
 
-status_t leader_change_role_nowait(uint32 stream_id, uint32 node_id, dcf_role_t new_role)
+status_t leader_change_member_nowait(uint32 stream_id, uint32 node_id, dcf_change_member_t *change_info)
 {
     /* voter_num must >3 before change node to passive */
-    if (new_role == DCF_ROLE_PASSIVE) {
+    if (NEED_CHANGE_ROLE(change_info->op_type) && change_info->new_role == DCF_ROLE_PASSIVE) {
         uint32 voter_num = 0;
         if (md_get_voter_num(stream_id, &voter_num) != CM_SUCCESS) {
-            LOG_DEBUG_ERR("get voter_num fail.");
+            LOG_DEBUG_ERR("get voter_num failed.");
             return CM_ERROR;
         }
         if (voter_num <= CM_LEAST_VOTER) {
@@ -1329,104 +1471,123 @@ status_t leader_change_role_nowait(uint32 stream_id, uint32 node_id, dcf_role_t 
     }
 
     CM_RETURN_IFERR(md_set_status(META_CATCH_UP));
-    if (change_member_role_request(stream_id, node_id, new_role) != CM_SUCCESS) {
-        LOG_DEBUG_ERR("change node[%u]'s role to new_role[%u] fail.", node_id, new_role);
+    if (change_member_request(stream_id, node_id, change_info) != CM_SUCCESS) {
+        LOG_DEBUG_ERR("change node[%u]'s member failed.", node_id);
         CM_RETURN_IFERR(md_set_status(META_NORMAL));
         return CM_ERROR;
     }
 
-    LOG_DEBUG_INF("change_member_role end, node_id=%u, new_role=%u.", node_id, new_role);
+    LOG_DEBUG_INF("change_member end, node_id=%u, op_type=%u.", node_id, change_info->op_type);
     return CM_SUCCESS;
 }
 
-
-status_t change_role_req_proc(mec_message_t *pack)
+status_t change_member_req_proc(mec_message_t *pack)
 {
     uint32 stream_id = pack->head->stream_id;
     uint32 src_node_id = pack->head->src_inst;
-    LOG_DEBUG_INF("recv change_role_req: stream_id=%u, src_node=%u", stream_id, src_node_id);
+    LOG_DEBUG_INF("recv change_member_req: stream_id=%u, src_node=%u", stream_id, src_node_id);
 
     if (!I_AM_LEADER(stream_id)) {
-        LOG_DEBUG_ERR("I'm not leader now, can't change node[%u]'s role.", src_node_id);
+        LOG_DEBUG_ERR("I'm not leader now, can't change node[%u]'s member.", src_node_id);
         return CM_ERROR;
     }
 
-    if (src_node_id == md_get_cur_node()) {
+    dcf_change_member_t change_info;
+    CM_RETURN_IFERR(decode_change_member_req(pack, &change_info));
+    if (NEED_CHANGE_ROLE(change_info.op_type) && src_node_id == md_get_cur_node()) {
         LOG_DEBUG_ERR("src_node[%u] is leader now, can't change role.", src_node_id);
         return CM_ERROR;
     }
 
-    uint32 new_role;
-    CM_RETURN_IFERR(mec_get_int32(pack, (int32*)&new_role));
-
-    return leader_change_role_nowait(stream_id, src_node_id, new_role);
+    return leader_change_member_nowait(stream_id, src_node_id, &change_info);
 }
 
-status_t leader_change_role_process(uint32 stream_id, uint32 node_id, dcf_role_t new_role, unsigned int wait_timeout_ms)
+status_t leader_change_member_process(uint32 stream_id, uint32 node_id, dcf_change_member_t *change_info,
+    unsigned int wait_timeout_ms)
 {
-    CM_RETURN_IFERR(leader_change_role_nowait(stream_id, node_id, new_role));
+    CM_RETURN_IFERR(leader_change_member_nowait(stream_id, node_id, change_info));
     return wait_process(wait_timeout_ms);
 }
 
-status_t nonleader_change_role_process(uint32 stream_id, uint32 leader, uint32 node_id,
-    dcf_role_t new_role, unsigned int wait_timeout_ms)
+status_t nonleader_change_member_process(uint32 stream_id, uint32 leader, uint32 node_id,
+    dcf_change_member_t *change_info, unsigned int wait_timeout_ms)
 {
     if (md_get_cur_node() != node_id) {
-        LOG_DEBUG_ERR("nonleader can only change self's role now, node_id=%u.", node_id);
+        LOG_DEBUG_ERR("nonleader can only change self's member, node_id=%u.", node_id);
         return CM_ERROR;
     }
 
     CM_RETURN_IFERR(md_set_status(META_CATCH_UP));
-    CM_RETURN_IFERR_EX(change_role_req(stream_id, leader, new_role), md_set_status(META_NORMAL));
-    date_t begin = g_timer()->now;
-    while (((uint64)(g_timer()->now - begin)) / MICROSECS_PER_MILLISEC < wait_timeout_ms) {
-        if (elc_get_node_role(stream_id) == new_role) {
-            LOG_DEBUG_INF("change self's role to new_role[%u] success.", new_role);
-            return CM_SUCCESS;
+    CM_RETURN_IFERR_EX(change_member_req(stream_id, leader, change_info), md_set_status(META_NORMAL));
+    timespec_t begin = cm_clock_now();
+    uint32 op_type = change_info->op_type;
+    while (((uint64)(cm_clock_now() - begin)) / MICROSECS_PER_MILLISEC < wait_timeout_ms) {
+        cm_sleep(CM_SLEEP_10_FIXED);
+        if ((NEED_CHANGE_ROLE(op_type) && elc_get_node_role(stream_id) != change_info->new_role) ||
+            (NEED_CHANGE_GROUP(op_type) && elc_get_my_group(stream_id) != change_info->new_group) ||
+            (NEED_CHANGE_PRIORITY(op_type) && elc_get_my_priority(stream_id) != change_info->new_priority)) {
+            continue;
         }
-        cm_sleep(1);
+        LOG_DEBUG_INF("change self's member success, op_type=%u", op_type);
+        return CM_SUCCESS;
     }
-    LOG_DEBUG_ERR("change self's role to new_role[%u] timeout, wait_time=%u ms", new_role, wait_timeout_ms);
+    LOG_DEBUG_ERR("change self's member timeout, wait_time=%u ms", wait_timeout_ms);
     CM_RETURN_IFERR(md_set_status(META_NORMAL));
     return CM_TIMEDOUT;
 }
 
-int dcf_change_member_role(unsigned int stream_id, unsigned int node_id, dcf_role_t new_role,
-    unsigned int wait_timeout_ms)
+int dcf_change_member(const char *change_str, unsigned int wait_timeout_ms)
 {
-    LOG_OPER("dcf change member role, stream_id=%u node_id=%u new_role=%d wait_timeout_ms=%u",
-        stream_id, node_id, new_role, wait_timeout_ms);
+    uint32 stream_id = CM_INVALID_STREAM_ID;
+    uint32 node_id = CM_INVALID_NODE_ID;
+    dcf_change_member_t change_info = {0};
+
     cm_reset_error();
+    CM_CHECK_NULL_PTR(change_str);
+    LOG_OPER("dcf change member, change_str=%s wait_timeout_ms=%u", change_str, wait_timeout_ms);
+
+    CM_RETURN_IFERR(parse_change_member_str(change_str, &stream_id, &node_id, &change_info));
     CM_RETURN_IF_FALSE(check_if_node_inited(stream_id));
-    if (new_role != DCF_ROLE_FOLLOWER && new_role != DCF_ROLE_PASSIVE) {
-        LOG_DEBUG_ERR("change member's role to (%u) is not support.", new_role);
+    if (NEED_CHANGE_ROLE(change_info.op_type) &&
+        (change_info.new_role != DCF_ROLE_FOLLOWER && change_info.new_role != DCF_ROLE_PASSIVE)) {
+        LOG_DEBUG_ERR("change member's role to (%u) is not support.", change_info.new_role);
         return CM_ERROR;
     }
-
     dcf_node_t node_info;
     CM_RETURN_IFERR(md_get_stream_node_ext(stream_id, node_id, &node_info));
-    if (node_info.default_role == DCF_ROLE_LOGGER) {
+    if (NEED_CHANGE_ROLE(change_info.op_type) && node_info.default_role == DCF_ROLE_LOGGER) {
         LOG_DEBUG_ERR("change LOGGER's role is not support.");
         return CM_ERROR;
     }
 
     uint32 leader = elc_get_votefor(stream_id);
     if (leader == CM_INVALID_NODE_ID) {
-        LOG_DEBUG_ERR("leader=%d invalid, can't change role now.", CM_INVALID_NODE_ID);
+        LOG_DEBUG_ERR("leader=%d invalid, can't change member now.", CM_INVALID_NODE_ID);
         return CM_ERROR;
     }
-    if (node_id == leader) {
+    if (NEED_CHANGE_ROLE(change_info.op_type) && node_id == leader) {
         LOG_DEBUG_ERR("node_id (%u) is leader, can't change role.", node_id);
         return CM_ERROR;
     }
 
     if (I_AM_LEADER(stream_id)) {
-        LOG_DEBUG_INF("I'm leader, change node[%u]'s role now.", node_id);
-        return leader_change_role_process(stream_id, node_id, new_role, wait_timeout_ms);
+        LOG_DEBUG_INF("I'm leader, change node[%u]'s member now.", node_id);
+        return leader_change_member_process(stream_id, node_id, &change_info, wait_timeout_ms);
     } else {
-        LOG_DEBUG_INF("I'm not leader, change node[%u]'s role now.", node_id);
-        return nonleader_change_role_process(stream_id, leader, node_id, new_role, wait_timeout_ms);
+        LOG_DEBUG_INF("I'm not leader, change node[%u]'s member now.", node_id);
+        return nonleader_change_member_process(stream_id, leader, node_id, &change_info, wait_timeout_ms);
     }
+}
+
+#define CHANGE_ROLE_BUFFER_SIZE   (uint32)256
+
+int dcf_change_member_role(unsigned int stream_id, unsigned int node_id, dcf_role_t new_role,
+    unsigned int wait_timeout_ms)
+{
+    char change_str[CHANGE_ROLE_BUFFER_SIZE] = {0};
+    PRTS_RETURN_IFERR(snprintf_s(change_str, CHANGE_ROLE_BUFFER_SIZE, CHANGE_ROLE_BUFFER_SIZE - 1,
+        "[{\"stream_id\":%u,\"node_id\":%u,\"role\":\"%s\"}]", stream_id, node_id, md_get_rolename_by_type(new_role)));
+    return dcf_change_member(change_str, wait_timeout_ms);
 }
 
 int dcf_set_applied_index(unsigned int stream_id, unsigned long long index)
@@ -1523,6 +1684,7 @@ bool32 log_catch_up(uint32 stream_id, uint32 node_id)
         cmp_idx = rep_leader_get_match_index(stream_id, node_id).index;
     } else {
         cmp_idx = rep_follower_get_leader_last_idx(stream_id);
+        cmp_idx = MAX(get_block_last_index(stream_id), cmp_idx);
     }
 
     return ((my_idx == cmp_idx) && (my_idx != 0));
@@ -1565,11 +1727,11 @@ int dcf_promote_leader(unsigned int stream_id, unsigned int node_id, unsigned in
         return elc_promote_leader(stream_id, node_id);
     }
 
-    set_block_ack(stream_id, NO_ACK);
+    set_block_ack(stream_id, NO_ACK, CM_INVALID_INDEX_ID);
     CM_RETURN_IFERR(block_node_req(stream_id, leader, wait_timeout_ms));
-    date_t begin = g_timer()->now;
+    timespec_t begin = cm_clock_now();
     block_ack_t ack = get_block_ack(stream_id);
-    while (((uint64)(g_timer()->now - begin)) / MICROSECS_PER_MILLISEC < wait_timeout_ms) {
+    while (((uint64)(cm_clock_now() - begin)) / MICROSECS_PER_MILLISEC < wait_timeout_ms) {
         if (ack == ERROR_ACK) {
             LOG_DEBUG_ERR("recv error ack, ack=%d.", ack);
             return CM_ERROR;
@@ -1580,7 +1742,7 @@ int dcf_promote_leader(unsigned int stream_id, unsigned int node_id, unsigned in
             }
         }
         CHECK_IF_ROLE_CHANGE(stream_id, original_role);
-        cm_sleep(1);
+        cm_sleep(CM_SLEEP_1_FIXED);
         ack = get_block_ack(stream_id);
     }
 
@@ -1588,11 +1750,11 @@ int dcf_promote_leader(unsigned int stream_id, unsigned int node_id, unsigned in
     return CM_ERROR;
 }
 
-int dcf_timeout_notify(unsigned int stream_id, unsigned int node_id)
+int dcf_timeout_notify(unsigned int stream_id)
 {
     CM_RETURN_IF_FALSE(check_if_node_inited(stream_id));
 
-    date_t now = g_timer()->now;
+    timespec_t now = cm_clock_now();
     uint32 elc_times = elc_stream_get_elc_timeout_ms() * MICROSECS_PER_MILLISEC;
 
     if (stream_id != 0) {
@@ -1730,6 +1892,10 @@ int dcf_broadcast_msg(unsigned int stream_id, const char* msg, unsigned int msg_
 int dcf_pause_rep(unsigned int stream_id, unsigned int node_id, unsigned int time_us)
 {
     CM_RETURN_IF_FALSE(check_if_node_inited(stream_id));
+    if (node_id == CM_INVALID_NODE_ID || node_id >= CM_MAX_NODE_COUNT) {
+        LOG_DEBUG_ERR("The msg parameter from node_id is invalid.");
+        return CM_ERROR;
+    }
     LOG_OPER("dcf set pausing time for replication, stream_id=%u node_id=%d time_us=%u", stream_id, node_id, time_us);
     if (time_us > DCF_PAUSE_TIME) {
         LOG_DEBUG_ERR("time_us %u is greater than 1000000.", time_us);
@@ -1743,6 +1909,394 @@ int dcf_pause_rep(unsigned int stream_id, unsigned int node_id, unsigned int tim
     return CM_SUCCESS;
 }
 
+int dcf_demote_follower(unsigned int stream_id)
+{
+    cm_reset_error();
+    CM_RETURN_IF_FALSE(check_if_node_inited(stream_id));
+    LOG_OPER("dcf demote follower, stream_id=%u", stream_id);
+    return elc_demote_follower(stream_id);
+}
+
+#define UNIVERSAL_WAIT_TIME_OUT 3000
+
+static uint32 alloc_req_id(dcf_parallel_msg_t* parallel_msg)
+{
+    uint32 req_id = MAX_PARALLEL_MAX_NUM;
+    cm_spin_lock(&parallel_msg->lock, NULL);
+    for (int i = 0; i < MAX_PARALLEL_MAX_NUM; i++) {
+        uint32 cur_id = parallel_msg->cursor;
+        parallel_msg->cursor = (cur_id + 1) % MAX_PARALLEL_MAX_NUM;
+        if (parallel_msg->req_id_status[cur_id] == 0) {
+            parallel_msg->req_id_status[cur_id] = 1;
+            req_id = cur_id;
+            break;
+        }
+    }
+    cm_spin_unlock(&parallel_msg->lock);
+    return req_id;
+}
+
+static inline void free_req_id(dcf_parallel_msg_t* parallel_msg, uint32 req_id)
+{
+    cm_spin_lock(&parallel_msg->lock, NULL);
+    parallel_msg->req_id_status[req_id] = 0;
+    cm_spin_unlock(&parallel_msg->lock);
+}
+
+static inline uint64 get_commit_index_result(uint32 req_id)
+{
+    return (uint64)cm_atomic_get(&g_consensus_hc_info.ack_result[req_id]);
+}
+
+static inline void set_commit_index_result(uint32 req_id, uint64 result)
+{
+    (void)cm_atomic_set(&g_consensus_hc_info.ack_result[req_id], result);
+}
+
+status_t send_fetching_commit_index_remote_req(unsigned int stream_id, uint32 is_consensus, uint32 req_id)
+{
+    uint32 leader_node = elc_get_votefor(stream_id);
+    if (leader_node == CM_INVALID_NODE_ID) {
+        LOG_DEBUG_ERR("[DCF]leader=%d invalid, can't send consensus msg req now.", CM_INVALID_NODE_ID);
+        return CM_ERROR;
+    }
+
+    uint32 src_node = md_get_cur_node();
+    mec_message_t pack;
+    CM_RETURN_IFERR(mec_alloc_pack(&pack, MEC_CMD_GET_COMMIT_INDEX_REQ, src_node, leader_node, stream_id));
+    if (mec_put_int32(&pack, req_id) != CM_SUCCESS || mec_put_int32(&pack, is_consensus) != CM_SUCCESS) {
+        LOG_DEBUG_ERR("[DCF]consensus health-check encode failed, src_node=%u, leader=%u.", src_node, leader_node);
+        mec_release_pack(&pack);
+        return CM_ERROR;
+    }
+    status_t ret = mec_send_data(&pack);
+    mec_release_pack(&pack);
+    if (ret != CM_SUCCESS) {
+        LOG_DEBUG_ERR("[DCF]send consensus health-check req failed, src_node=%u, leader=%u.", src_node, leader_node);
+    }
+    return ret;
+}
+
+static inline uint64 get_universal_write_index(uint32 req_id)
+{
+    return (uint64)cm_atomic_get(&g_universal_write_info.ack_result[req_id]);
+}
+
+static inline void set_universal_write_index(uint32 req_id, uint64 index)
+{
+    (void)cm_atomic_set(&g_universal_write_info.ack_result[req_id], index);
+}
+
+status_t send_universal_write_req(unsigned int stream_id, const char *buffer, unsigned int length,
+    unsigned long long key, uint32 req_id)
+{
+    uint32 leader = elc_get_votefor(stream_id);
+    if (leader == CM_INVALID_NODE_ID) {
+        LOG_DEBUG_ERR("[DCF]leader=%d invalid, can't send universal write req now.", CM_INVALID_NODE_ID);
+        return CM_ERROR;
+    }
+
+    uint32 src_node = md_get_cur_node();
+    mec_message_t pack;
+    CM_RETURN_IFERR(mec_alloc_pack(&pack, MEC_CMD_UNIVERSAL_WRITE_REQ, src_node, leader, stream_id));
+    if (mec_put_int32(&pack, req_id) != CM_SUCCESS
+        || mec_put_int64(&pack, key) != CM_SUCCESS
+        || mec_put_bin(&pack, length, buffer) != CM_SUCCESS) {
+        LOG_DEBUG_ERR("[DCF]universal write encode failed, src_node=%u, leader=%u.", src_node, leader);
+        mec_release_pack(&pack);
+        return CM_ERROR;
+    }
+    status_t ret = mec_send_data(&pack);
+    mec_release_pack(&pack);
+    if (ret != CM_SUCCESS) {
+        LOG_DEBUG_ERR("[DCF]send universal write req failed, src_node=%u, leader=%u.", src_node, leader);
+    }
+    return ret;
+}
+
+int dcf_universal_write(unsigned int stream_id, const char *buffer, unsigned int length,
+    unsigned long long key, unsigned long long *index)
+{
+    cm_reset_error();
+    CM_RETURN_IF_FALSE(check_if_node_inited(stream_id));
+
+    if (buffer == NULL || length == 0) {
+        LOG_DEBUG_ERR("[DCF]buffer(%p) or length(%d) error.", buffer, length);
+        return CM_ERROR;
+    }
+
+    if (I_AM_LEADER(stream_id)) {
+        LOG_DEBUG_INF("[DCF]I am leader, write directly.");
+        return dcf_write(stream_id, buffer, length, key, index);
+    }
+
+    uint32 req_id = alloc_req_id(&g_universal_write_info);
+    if (req_id >= MAX_PARALLEL_MAX_NUM) {
+        LOG_DEBUG_ERR("[DCF]req_id=%d invalid, try later.", req_id);
+        return CM_ERROR;
+    }
+    uint64 last_write_index = 0;
+    set_universal_write_index(req_id, last_write_index);
+    CM_RETURN_IFERR_EX(send_universal_write_req(stream_id, buffer, length, key, req_id),
+        free_req_id(&g_universal_write_info, req_id));
+
+    timespec_t begin = cm_clock_now();
+    uint64 ack_index;
+    while (((uint64)(cm_clock_now() - begin)) / MICROSECS_PER_MILLISEC < UNIVERSAL_WAIT_TIME_OUT) {
+        ack_index = get_universal_write_index(req_id);
+        if (ack_index > last_write_index) {
+            LOG_DEBUG_INF("[DCF]universal write succeed, stream_id=%u buflength=%u key=%llu index=%llu req_id=%u",
+                stream_id, length, key, ack_index, req_id);
+            free_req_id(&g_universal_write_info, req_id);
+            if (index != NULL) {
+                *index = ack_index;
+            }
+            return CM_SUCCESS;
+        }
+        (void)cm_event_timedwait(&g_universal_write_info.event[req_id], CM_SLEEP_1_FIXED);
+    }
+    LOG_DEBUG_ERR("[DCF]universal write timeout %u ms, stream_id=%u buflength=%u key=%llu index=%llu req_id=%u",
+        UNIVERSAL_WAIT_TIME_OUT, stream_id, length, key, ack_index, req_id);
+    free_req_id(&g_universal_write_info, req_id);
+    return CM_TIMEDOUT;
+}
+
+status_t universal_write_req_proc(mec_message_t *pack)
+{
+    uint32 stream_id = pack->head->stream_id;
+    uint32 src_node = pack->head->src_inst;
+    LOG_DEBUG_INF("[DCF]recv universal_write_req: stream_id=%u, src_node=%u", stream_id, src_node);
+
+    uint32 req_id;
+    CM_RETURN_IFERR(mec_get_int32(pack, (int32*)&req_id));
+    uint64 key;
+    CM_RETURN_IFERR(mec_get_int64(pack, (int64*)&key));
+    char *buf = NULL;
+    uint32 len = 0;
+    CM_RETURN_IFERR(mec_get_bin(pack, &len, (void **)&buf));
+
+    uint64 write_index;
+    if (dcf_write(stream_id, buf, len, key, &write_index) != CM_SUCCESS) {
+        LOG_DEBUG_ERR("[DCF]recv universal_write_req: dcf write failed.");
+        return CM_ERROR;
+    }
+
+    mec_message_t ack_pack;
+    CM_RETURN_IFERR(mec_alloc_pack(&ack_pack, MEC_CMD_UNIVERSAL_WRITE_ACK, md_get_cur_node(), src_node, stream_id));
+    if (mec_put_int32(&ack_pack, req_id) != CM_SUCCESS
+        || mec_put_int64(&ack_pack, write_index) != CM_SUCCESS) {
+        LOG_DEBUG_ERR("[DCF]recv universal_write_req: encode failed,write_index=%llu.", write_index);
+        mec_release_pack(&ack_pack);
+        return CM_ERROR;
+    }
+    status_t ret = mec_send_data(&ack_pack);
+    mec_release_pack(&ack_pack);
+    if (ret != CM_SUCCESS) {
+        LOG_DEBUG_ERR("[DCF]recv universal_write_req: send data failed.");
+    }
+    return ret;
+}
+
+status_t universal_write_ack_proc(mec_message_t *pack)
+{
+    uint32 stream_id = pack->head->stream_id;
+    uint32 req_id;
+    CM_RETURN_IFERR(mec_get_int32(pack, (int32*)&req_id));
+    uint64 ack_write_index;
+    CM_RETURN_IFERR(mec_get_int64(pack, (int64*)&ack_write_index));
+    LOG_DEBUG_INF("[DCF]recv universal_write_ack: stream_id=%u, req_id=%u, writeindex=%llu.",
+        stream_id, req_id, ack_write_index);
+    if (req_id < MAX_PARALLEL_MAX_NUM) {
+        set_universal_write_index(req_id, ack_write_index);
+        cm_event_notify(&g_universal_write_info.event[req_id]);
+    } else {
+        LOG_DEBUG_ERR("[DCF]recv universal_write_ack: req_id=%u error, writeindex=%llu.", req_id, ack_write_index);
+        return CM_ERROR;
+    }
+    return CM_SUCCESS;
+}
+
+status_t dcf_get_commit_index_local(unsigned int stream_id, unsigned int is_consensus,
+    unsigned long long* commit_index)
+{
+    dcf_role_t node_role = DCF_ROLE_UNKNOWN;
+    unsigned int is_healthy = CM_FALSE;
+    if (is_consensus) {
+        if (dcf_node_is_healthy(stream_id, &node_role, &is_healthy) != CM_SUCCESS || !is_healthy) {
+            LOG_DEBUG_ERR("[DCF]Health check failed or the node is not healthy for geting commit index.");
+            return CM_ERROR;
+        }
+    }
+    *commit_index = rep_get_data_commit_index(stream_id);
+    if (*commit_index == 0) {
+        LOG_DEBUG_ERR("[DCF] dcf get local log data commit index failed.");
+        return CM_ERROR;
+    }
+    return CM_SUCCESS;
+}
+
+status_t dcf_get_commit_index_req_proc(mec_message_t *pack)
+{
+    uint32 src_node = pack->head->src_inst;
+    uint32 stream_id = pack->head->stream_id;
+    uint64 commit_index = 0;
+    LOG_DEBUG_INF("[DCF]Recv dcf_health_check_req: stream_id=%u, src_node=%u", stream_id, src_node);
+
+    uint32 req_id;
+    CM_RETURN_IFERR(mec_get_int32(pack, (int32*)&req_id));
+    uint32 is_consensus = 0;
+    CM_RETURN_IFERR(mec_get_int32(pack, (int32*)&is_consensus));
+
+    if (I_AM_LEADER(stream_id)) {
+        if (dcf_get_commit_index_local(stream_id, is_consensus, &commit_index) != CM_SUCCESS) {
+            // the node is not leader, so send commit_index(0) to remote.
+            LOG_DEBUG_ERR("[DCF]Recv get_commit_index_req: check health failed, so send commit_index(0) to remote.");
+        }
+    } else {
+        // the node is not leader, so send commit_index(0) to remote.
+        LOG_DEBUG_ERR("[DCF]Recv get_commit_index_req: it's not leader now.");
+    }
+
+    mec_message_t ack_pack;
+    CM_RETURN_IFERR(mec_alloc_pack(&ack_pack, MEC_CMD_GET_COMMIT_INDEX_ACK, md_get_cur_node(), src_node, stream_id));
+    if (mec_put_int32(&ack_pack, req_id) != CM_SUCCESS
+        || mec_put_int64(&ack_pack, commit_index) != CM_SUCCESS) {
+        LOG_DEBUG_ERR("[DCF]Recv get_commit_index_req: encode failed, commit_index=%llu.", commit_index);
+        mec_release_pack(&ack_pack);
+        return CM_ERROR;
+    }
+    status_t ret = mec_send_data(&ack_pack);
+    mec_release_pack(&ack_pack);
+    if (ret != CM_SUCCESS) {
+        LOG_DEBUG_ERR("[DCF]Recv get_commit_index_req: send data failed.");
+    }
+    return ret;
+}
+
+status_t dcf_get_commit_index_ack_proc(mec_message_t *pack)
+{
+    uint32 stream_id = pack->head->stream_id;
+    uint32 req_id;
+    CM_RETURN_IFERR(mec_get_int32(pack, (int32*)&req_id));
+    uint64 commit_index;
+    CM_RETURN_IFERR(mec_get_int64(pack, (int64*)&commit_index));
+    LOG_DEBUG_INF("[DCF]Recv get_commit_index_ack: stream_id=%u, req_id=%u, commit_index=%llu.",
+        stream_id, req_id, commit_index);
+    if (req_id < MAX_PARALLEL_MAX_NUM) {
+        set_commit_index_result(req_id, commit_index);
+        cm_event_notify(&g_consensus_hc_info.event[req_id]);
+    } else {
+        LOG_DEBUG_ERR("[DCF]recv get_commit_index_ack: req_id=%u error, commit_index=%llu.", req_id, commit_index);
+        return CM_ERROR;
+    }
+    return CM_SUCCESS;
+}
+
+int dcf_get_commit_index_remote(unsigned int stream_id, unsigned int is_consensus,
+    unsigned long long* commit_index)
+{
+    uint32 req_id = alloc_req_id(&g_consensus_hc_info);
+    if (req_id >= MAX_PARALLEL_MAX_NUM) {
+        LOG_DEBUG_ERR("[DCF]Check health using req_id=%d invalid, try later.", req_id);
+        return CM_ERROR;
+    }
+    int64 index_default = -1;
+    set_commit_index_result(req_id, index_default);
+    CM_RETURN_IFERR_EX(send_fetching_commit_index_remote_req(stream_id, is_consensus, req_id),
+        free_req_id(&g_consensus_hc_info, req_id));
+
+    timespec_t begin = cm_clock_now();
+    uint64 result;
+    while (((uint64)(cm_clock_now() - begin)) / MICROSECS_PER_MILLISEC < UNIVERSAL_WAIT_TIME_OUT) {
+        result = get_commit_index_result(req_id);
+        if ((int64)result != index_default) {
+            free_req_id(&g_consensus_hc_info, req_id);
+            if (result == 0) {
+                LOG_DEBUG_ERR("[DCF]Check health using req_id=%d failed for getting commit index.", req_id);
+                return CM_ERROR;
+            }
+
+            LOG_DEBUG_INF("[DCF]leader check health succeed, stream_id=%u result=%llu req_id=%u",
+                stream_id, result, req_id);
+            *commit_index = result;
+            return CM_SUCCESS;
+        }
+        (void)cm_event_timedwait(&g_consensus_hc_info.event[req_id], CM_SLEEP_1_FIXED);
+    }
+    LOG_DEBUG_ERR("[DCF]Waiting health-check timeout %u ms, stream_id=%u req_id=%u",
+        UNIVERSAL_WAIT_TIME_OUT, stream_id, req_id);
+    free_req_id(&g_consensus_hc_info, req_id);
+    return CM_TIMEDOUT;
+}
+
+int dcf_get_data_commit_index(unsigned int stream_id, dcf_commit_index_type_t index_type, unsigned long long* index)
+{
+    CM_RETURN_IF_FALSE(check_if_node_inited(stream_id));
+    if (index == NULL) {
+        LOG_DEBUG_ERR("[DCF]The parameter index is null for geting commit index.");
+        return CM_ERROR;
+    }
+    unsigned int is_consensus = CM_FALSE;
+
+    if (index_type == DCF_LOCAL_COMMIT_INDEX) {
+        return dcf_get_commit_index_local(stream_id, CM_FALSE, index);
+    } else if (index_type == DCF_LEADER_COMMIT_INDEX) {
+        is_consensus = CM_FALSE;
+    } else if (index_type == DCF_CONSENSUS_COMMIT_INDEX) {
+        is_consensus = CM_TRUE;
+    } else {
+        LOG_DEBUG_ERR("[DCF]Getting commit index for index_type=%d is over range.", index_type);
+        return CM_ERROR;
+    }
+
+    if (I_AM_LEADER(stream_id)) {
+        LOG_DEBUG_INF("[DCF]I am leader, and get commit index directly.");
+        return dcf_get_commit_index_local(stream_id, is_consensus, index);
+    } else {
+        int ret = dcf_get_commit_index_remote(stream_id, is_consensus, index);
+        if (ret != CM_SUCCESS) {
+            LOG_DEBUG_ERR("[DCF]It's failed or timeout from leader for geting commit index.");
+            return ret;
+        }
+    }
+
+    return CM_SUCCESS;
+}
+
+int dcf_get_current_term_and_role(unsigned int stream_id, unsigned long long* term, dcf_role_t* role)
+{
+    CM_RETURN_IF_FALSE(check_if_node_inited(stream_id));
+    if (term == NULL || role == NULL) {
+        LOG_DEBUG_ERR("[DCF]term(%p) or role(%p) error.", term, role);
+        return CM_ERROR;
+    }
+    return elc_get_current_term_and_role(stream_id, term, role);
+}
+
+int dcf_set_election_priority(unsigned int stream_id, unsigned long long priority)
+{
+    static date_t last[CM_MAX_STREAM_COUNT] = {0};
+    if (stream_id >= CM_MAX_STREAM_COUNT) {
+        LOG_DEBUG_ERR("[DCF]stream_id=%u invalid", stream_id);
+        return CM_ERROR;
+    }
+
+    date_t now = g_timer()->now;
+    if (now - last[stream_id] < MICROSECS_PER_SECOND) {
+        LOG_DEBUG_INF("[DCF]interval too small.stream_id=%u priority=%llu can't set this time.", stream_id, priority);
+        return CM_SUCCESS;
+    }
+    last[stream_id] = now;
+
+    if (!elc_stream_get_auto_elc_pri_en()) {
+        LOG_DEBUG_INF("[DCF]auto_priority disabled.stream_id=%u priority=%llu can't set.", stream_id, priority);
+        return CM_SUCCESS;
+    }
+
+    CM_RETURN_IF_FALSE(check_if_node_inited(stream_id));
+    elc_set_my_priority(stream_id, priority);
+    return CM_SUCCESS;
+}
 
 #ifdef WIN32
 const char *dcf_get_version()
@@ -1752,6 +2306,11 @@ const char *dcf_get_version()
 #else
 extern const char *dcf_get_version();
 #endif
+
+void dcf_set_timer(void *timer)
+{
+    cm_set_timer((gs_timer_t *)timer);
+}
 
 #ifdef __cplusplus
 }

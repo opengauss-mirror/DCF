@@ -67,65 +67,65 @@ static text_t g_month_roman_names[12] = {
 };
 
 #define FORMAT_ITEM_BUFFER_SIZE 16
-errno_t cm_fmt_indicator(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_indicator(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     res->append_text->str = para->detail_ex->is_am ? (char *)"AM" : (char *)"PM";
     res->append_text->len = 2;
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_dq_text(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_dq_text(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     *res->append_text = *(para->fmt_extra);
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_dot_to_colon(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_dot_to_colon(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     *res->append_text = para->item->name;
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_x(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_x(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     res->append_text->str = (char *)".";
     res->append_text->len = 1;
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_day_name(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_day_name(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     *res->append_text = g_week_days[para->detail_ex->day_of_week];
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_day_abbr_name(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_day_abbr_name(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     res->append_text->str = g_week_days[para->detail_ex->day_of_week].str;
     res->append_text->len = 3; /* for abbreviation, the length is 3 */
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_month_abbr_name(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_month_abbr_name(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     res->append_text->str = g_month_names[para->detail->mon - 1].str;
     res->append_text->len = 3;
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_month_rm(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_month_rm(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     *res->append_text = g_month_roman_names[para->detail->mon - 1];
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_month_name(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_month_name(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     *res->append_text = g_month_names[para->detail->mon - 1];
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_year1_to_year4(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_year1_to_year4(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1,
                                  "%04u", para->detail->year));
@@ -142,21 +142,21 @@ static inline uint32 cm_get_century(const date_detail_t *detail)
     return ((uint32)detail->year - 1) / CM_YEARS_PER_CMNTURY + 1;
 }
 
-errno_t cm_fmt_century(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_century(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1, "%02u",
                                  cm_get_century(para->detail)));
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_day_of_week(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_day_of_week(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1, "%u",
                                  para->detail_ex->day_of_week + 1));
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_hour_of_day12(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_hour_of_day12(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     uint8 hh12_value;
     if (para->detail->hour == 0) {
@@ -171,63 +171,63 @@ errno_t cm_fmt_hour_of_day12(append_date_text_para_t* para, append_date_text_res
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_hour_of_day24(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_hour_of_day24(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1,
                                  "%02u", para->detail->hour));
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_quarter(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_quarter(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1,
                                  "%u", para->detail_ex->quarter));
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_second(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_second(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1,
                                  "%02u", para->detail->sec));
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_second_pass(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_second_pass(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1,
                                  "%05u", para->detail_ex->seconds));
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_week_of_year(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_week_of_year(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1,
                                  "%02u", para->detail_ex->week));
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_week_of_month(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_week_of_month(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1, "%u",
                                  (para->detail->day / 7) + 1));
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_day_of_month(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_day_of_month(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1, "%02u",
                                  (para->detail->day)));
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_day_of_year(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_day_of_year(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1, "%03u",
                                  para->detail_ex->day_of_year));
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_frac_second1_to_second3(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_frac_second1_to_second3(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1, "%03u",
                                  para->detail->millisec));
@@ -237,7 +237,7 @@ errno_t cm_fmt_frac_second1_to_second3(append_date_text_para_t* para, append_dat
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_frac_second4_to_second6(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_frac_second4_to_second6(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     uint32 frac;
     frac = (uint32)para->detail->millisec * MICROSECS_PER_MILLISEC + para->detail->microsec;
@@ -249,7 +249,7 @@ errno_t cm_fmt_frac_second4_to_second6(append_date_text_para_t* para, append_dat
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_frac_sec_var_len(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_frac_sec_var_len(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     uint32 frac;
     if (para->prec == 0) {
@@ -269,21 +269,21 @@ errno_t cm_fmt_frac_sec_var_len(append_date_text_para_t* para, append_date_text_
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_minute(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_minute(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1,
                                  "%02u", para->detail->min));
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_month(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_month(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1,
                                  "%02u", para->detail->mon));
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_tz_hour(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_tz_hour(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     int32 tz_hour;
     tz_hour = TIMEZONE_GET_HOUR(para->detail->tz_offset);
@@ -292,7 +292,7 @@ errno_t cm_fmt_tz_hour(append_date_text_para_t* para, append_date_text_res_t* re
     return CM_SUCCESS;
 }
 
-errno_t cm_fmt_tz_minute(append_date_text_para_t* para, append_date_text_res_t* res)
+errno_t cm_fmt_tz_minute(const append_date_text_para_t* para, append_date_text_res_t* res)
 {
     int32 tz_minute;
     tz_minute = TIMEZONE_GET_MINUTE(para->detail->tz_offset);

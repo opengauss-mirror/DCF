@@ -39,7 +39,7 @@
 #include "cm_file.h"
 #include "cJSON.h"
 
-
+#define DEFAULT_STAT_INTERVAL 3
 #define MAX_ITEM_COUNT 100
 #define STAT_TABLE_SIZE 2
 #define STAT_ITEM_WIDTH 21
@@ -87,6 +87,7 @@ typedef enum stat_item_id {
     HB_SEND_COUNT,
     HB_RECV_COUNT,
     HB_RTT,
+    MEC_BUDDY_MEM,
     STAT_ITEM_ID_CEIL
 } stat_item_id_t;
 
@@ -125,7 +126,7 @@ status_t cm_profile_stat_init();
 
 void cm_profile_stat_uninit();
 
-status_t cm_reg_stat_item(stat_item_id_t item_id, char* name, stat_unit_t unit, uint32 indicator,
+status_t cm_reg_stat_item(stat_item_id_t item_id, const char* name, stat_unit_t unit, uint32 indicator,
     cb_get_value_func_t value_func);
 
 void stat_record(stat_item_id_t item_id, uint64 value);

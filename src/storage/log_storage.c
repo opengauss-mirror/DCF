@@ -29,7 +29,7 @@
 #include "meta_storage.h"
 
 
-static inline bool32 is_valid_log_file(char *file_name, bool32 is_empty)
+static inline bool32 is_valid_log_file(const char *file_name, bool32 is_empty)
 {
     if ((is_empty && strncmp(file_name, "log_", strlen("log_")) == 0) ||
         (strncmp(file_name + (strlen(file_name) - strlen(".tmp")), ".tmp", strlen(".tmp"))) == 0) {
@@ -242,7 +242,7 @@ static status_t list_segments(log_storage_t *storage, bool32 is_empty)
     return CM_SUCCESS;
 }
 
-static inline int32 segment_cmp_2(pointer_t seg1, pointer_t seg2)
+static inline int32 segment_cmp_2(const pointer_t seg1, const pointer_t seg2)
 {
     if (((segment_t*)seg1)->last_index < ((segment_t*)seg2)->first_index) {
         return -1;
@@ -398,7 +398,7 @@ status_t init_log_storage(log_storage_t *storage, char *home, uint64 applied_ind
     return save_log_meta(storage, storage->first_index);
 }
 
-static inline int32 segment_cmp(segment_t *segment, uint64 index)
+static inline int32 segment_cmp(const segment_t *segment, uint64 index)
 {
     if (index < segment->first_index) {
         return -1;

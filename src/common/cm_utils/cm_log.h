@@ -29,6 +29,7 @@
 #include "cm_spinlock.h"
 #include "cm_error.h"
 #include "cm_thread.h"
+#include "cm_hash.h"
 #include "dcf_interface.h"
 
 #ifdef __cplusplus
@@ -61,6 +62,7 @@ typedef struct st_log_param {
     uint32 log_file_permissions;
     uint32 log_bak_file_permissions;
     uint32 log_path_permissions;
+    volatile uint32 log_filename_format;
     volatile uint32 log_level;
     volatile uint32 log_backup_file_count;
     volatile uint32 audit_backup_file_count;
@@ -68,6 +70,7 @@ typedef struct st_log_param {
     volatile uint64 max_audit_file_size;
     bool32 log_instance_startup;
     usr_cb_log_output_t log_write;
+    bool32 log_suppress_enable;
     char instance_name[CM_MAX_NAME_LEN];
 } log_param_t;
 

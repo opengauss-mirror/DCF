@@ -25,7 +25,7 @@
 #include "batcher.h"
 #include "util_profile_stat.h"
 
-status_t batcher_append(log_storage_t *storage, batcher_t *batcher, log_entry_t *entry)
+status_t batcher_append(log_storage_t *storage, batcher_t *batcher, const log_entry_t *entry)
 {
     if (ENTRY_INDEX(entry) != batcher->last_index + 1) {
         LOG_DEBUG_WAR("[STG]Invalid log index %llu, segment's %llu", ENTRY_INDEX(entry), batcher->last_index + 1);

@@ -26,6 +26,8 @@
 #define __UTIL_DEFS__
 #include "cm_defs.h"
 #include "cm_log.h"
+#include "time.h"
+#include "cm_date_to_text.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,17 +48,17 @@ extern "C" {
 #define REP_DEFALT_APPEND_THREAS_NUM     (2)
 #define REP_MAX_APPEND_THREAS_NUM        (1000)
 
-#define COMM_MEM_POOL_MAX_SIZE         SIZE_G((uint64)2)
+#define COMM_MEM_POOL_MAX_SIZE         SIZE_M(256)
 #define COMM_MEM_POOL_MIN_SIZE         SIZE_M(32)
 
-#define STG_MEM_POOL_MAX_SIZE         SIZE_G((uint64)2)
+#define STG_MEM_POOL_MAX_SIZE         SIZE_M(200)
 #define STG_MEM_POOL_MIN_SIZE         SIZE_M(32)
 
-#define MEC_MEM_POOL_MAX_SIZE         SIZE_M(200)
+#define MEC_MEM_POOL_MAX_SIZE         SIZE_M(100)
 
 #define MESSAGE_BUFFER_SIZE      (SIZE_K(64))
 #define PADDING_BUFFER_SIZE      (SIZE_K(1))
-#define MEC_BUFFER_RESV_SIZE     (SIZE_K(7)) // used for rep_apendlog_req_t and PADDING_BUFFER_SIZE
+#define MEC_BUFFER_RESV_SIZE     (SIZE_K(2)) // used for rep head、mec head and PADDING_BUFFER_SIZE
 #define DEFAULT_MEC_BATCH_SIZE            0
 
 #define MEC_MAX_MESSAGE_BUFFER_SIZE      (10 * 1024)
@@ -93,6 +95,19 @@ do { \
     } \
 } while (0)
 
+typedef uint64 timespec_t;
+
+static inline uint64 cm_clock_now()
+{
+#ifndef WIN32
+    struct timespec now = {0, 0};
+    (void)clock_gettime(CLOCK_MONOTONIC, &now);
+    return now.tv_sec * MICROSECS_PER_SECOND + now.tv_nsec / NANOSECS_PER_MICROSECS;
+#else
+    uint64 now = GetTickCount();
+    return (now * MICROSECS_PER_MILLISEC);
+#endif
+}
 
 #ifdef __cplusplus
 }

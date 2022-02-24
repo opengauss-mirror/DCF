@@ -58,13 +58,7 @@ static spinlock_t g_get_pem_passwd_lock = 0;
 const char *g_ssl_default_cipher_list = "ECDHE-ECDSA-AES256-GCM-SHA384:"
                                         "ECDHE-ECDSA-AES128-GCM-SHA256:"
                                         "ECDHE-RSA-AES256-GCM-SHA384:"
-                                        "ECDHE-RSA-AES128-GCM-SHA256:"
-                                        "DHE-RSA-AES256-GCM-SHA384:"
-                                        "DHE-RSA-AES128-GCM-SHA256:"
-                                        "DHE-DSS-AES256-GCM-SHA384:"
-                                        "DHE-DSS-AES128-GCM-SHA256:"
-                                        "DHE-RSA-AES256-CCM:"
-                                        "DHE-RSA-AES128-CCM";
+                                        "ECDHE-RSA-AES128-GCM-SHA256:";
 
 const char *g_ssl_tls13_default_cipher_list = "TLS_AES_256_GCM_SHA384:"
                                               "TLS_CHACHA20_POLY1305_SHA256:"
@@ -78,13 +72,6 @@ const char *g_ssl_cipher_names[] = {
     "ECDHE-ECDSA-AES128-GCM-SHA256",
     "ECDHE-RSA-AES256-GCM-SHA384",
     "ECDHE-RSA-AES128-GCM-SHA256",
-    "DHE-RSA-AES256-GCM-SHA384",
-    "DHE-RSA-AES128-GCM-SHA256",
-    "DHE-DSS-AES256-GCM-SHA384",
-    "DHE-DSS-AES128-GCM-SHA256",
-    // CCM
-    "DHE-RSA-AES256-CCM",
-    "DHE-RSA-AES128-CCM",
     NULL
 };
 
@@ -777,6 +764,13 @@ static status_t cs_ssl_set_cipher(SSL_CTX *ctx, ssl_config_t *config, bool32* is
         *is_using_tls13 = CM_TRUE;
     }
 
+    if (tls12_cipher_str != NULL) {
+        LOG_DEBUG_INF("[MEC]tls12_cipher_str=%s", tls12_cipher_str);
+    }
+    if (tls13_cipher_str != NULL) {
+        LOG_DEBUG_INF("[MEC]tls13_cipher_str=%s", tls13_cipher_str);
+    }
+
     if (tls12_cipher_str != NULL && SSL_CTX_set_cipher_list(ctx, tls12_cipher_str) != 1) {
         return CM_ERROR;
     }
@@ -917,7 +911,7 @@ void cs_ssl_throw_error(int32 ssl_err)
 
     /* try get line data from ssl error queue */
     while ((ret_code = ERR_get_error_line_data(&file, &line, &data, &flags))) {
-        ret = snprintf_s(err_buf1 + err_len, CM_MESSAGE_BUFFER_SIZE - err_len, CM_MESSAGE_BUFFER_SIZE - 1 - err_len,
+        ret = snprintf_s(err_buf1 + err_len, CM_MESSAGE_BUFFER_SIZE - err_len, (CM_MESSAGE_BUFFER_SIZE - 1) - err_len,
             "OpenSSL:%s-%s-%d-%s",
             ERR_error_string(ret_code, err_buf2), file, line, (flags & ERR_TXT_STRING) ? data : "");
         if (ret == -1) {

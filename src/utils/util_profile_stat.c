@@ -29,7 +29,6 @@
 extern "C" {
 #endif
 
-#define DEFAULT_STAT_INTERVAL 1
 #define MAX_LINES_PRINT_HEAD 50
 #define STAT_THREAD_SLEEP_TIME 100
 
@@ -45,7 +44,7 @@ char *g_stat_unit_str[UNIT_CEIL] = {"", "us", "ms", "s", "byte", "KB", "MB", "GB
 stat_item_attr_t g_stat_item_attrs[STAT_ITEM_ID_CEIL] = { 0 };
 
 // called by inner module: need register statistics item firstly
-status_t cm_reg_stat_item(stat_item_id_t item_id, char* name, stat_unit_t unit, uint32 indicator,
+status_t cm_reg_stat_item(stat_item_id_t item_id, const char* name, stat_unit_t unit, uint32 indicator,
     cb_get_value_func_t value_func)
 {
     MEMS_RETURN_IFERR(strcpy_s(g_stat_item_attrs[item_id].name, STAT_ITEM_NAME_MAX_LEN + 1, name));
@@ -100,14 +99,14 @@ static inline int get_cal_table_id()
 {
     return (int)(cm_atomic_get(&g_stat_table_id) ^ 1);
 }
-static inline void cal_item_result_by_ratio(stat_item_t *stat_item, stat_item_result_t *result, double ratio)
+static inline void cal_item_result_by_ratio(const stat_item_t *stat_item, stat_item_result_t *result, double ratio)
 {
     result->id = stat_item->id;
     if (g_stat_item_attrs[stat_item->id].func != NULL) {
         result->value = stat_item->value * ratio;
         return;
     }
-    result->value = stat_item->value * ratio / DEFAULT_STAT_INTERVAL;
+    result->value = stat_item->value * ratio;
     result->avg_value = stat_item->avg_value * ratio;
     result->max = stat_item->max * ratio;
     result->min = stat_item->min *ratio;
@@ -191,7 +190,7 @@ void stat_calculate()
     cm_unlatch(&g_stat_result.latch, NULL);
 }
 
-static inline status_t build_item_head(char *item_name, char *suffix, char *item_unit, char *item_buf)
+static inline status_t build_item_head(char *item_name, const char *suffix, const char *item_unit, char *item_buf)
 {
     item_buf[0] = '\0';
     MEMS_RETURN_IFERR(strncat_s(item_buf, STAT_ITEM_WIDTH + 1, item_name, strlen(item_name)));
@@ -347,20 +346,20 @@ void print_perf()
     if (count++ % UTIL_PRINT_COUNT == 0) {
         LOG_PROFILE("\n[PERF]%12s%12s%12s%12s%12s%12s\n[PERF]%12.3f%12.3f%12.3f%12.3f%12.3f%12.3f",
             "total-ms", "apply-ms", "commit-ms", "l_accept-ms", "append-ms", "r_accept-ms",
-            (double)apply2_total / UTIL_PRINT_PRECISION / apply2_count,
-            (double)apply1_total / UTIL_PRINT_PRECISION / apply1_count,
-            (double)commit_total / UTIL_PRINT_PRECISION / commit_count,
-            (double)accept_total / UTIL_PRINT_PRECISION / accept_count,
-            (double)pack_total / UTIL_PRINT_PRECISION / pack_count,
-            (double)fo_accept_total / UTIL_PRINT_PRECISION / fo_accept_count);
+            ((double)apply2_total / UTIL_PRINT_PRECISION) / apply2_count,
+            ((double)apply1_total / UTIL_PRINT_PRECISION) / apply1_count,
+            ((double)commit_total / UTIL_PRINT_PRECISION) / commit_count,
+            ((double)accept_total / UTIL_PRINT_PRECISION) / accept_count,
+            ((double)pack_total / UTIL_PRINT_PRECISION) / pack_count,
+            ((double)fo_accept_total / UTIL_PRINT_PRECISION) / fo_accept_count);
     } else {
         LOG_PROFILE("\n[PERF]%12.3f%12.3f%12.3f%12.3f%12.3f%12.3f",
-            (double)apply2_total / UTIL_PRINT_PRECISION / apply2_count,
-            (double)apply1_total / UTIL_PRINT_PRECISION / apply1_count,
-            (double)commit_total / UTIL_PRINT_PRECISION / commit_count,
-            (double)accept_total / UTIL_PRINT_PRECISION / accept_count,
-            (double)pack_total / UTIL_PRINT_PRECISION / pack_count,
-            (double)fo_accept_total / UTIL_PRINT_PRECISION / fo_accept_count);
+            ((double)apply2_total / UTIL_PRINT_PRECISION) / apply2_count,
+            ((double)apply1_total / UTIL_PRINT_PRECISION) / apply1_count,
+            ((double)commit_total / UTIL_PRINT_PRECISION) / commit_count,
+            ((double)accept_total / UTIL_PRINT_PRECISION) / accept_count,
+            ((double)pack_total / UTIL_PRINT_PRECISION) / pack_count,
+            ((double)fo_accept_total / UTIL_PRINT_PRECISION) / fo_accept_count);
     }
 }
 

@@ -189,7 +189,7 @@ static hash_funcs_t g_json_hashs = {
     .f_hash = json_hash
 };
 
-static inline uint32 add_val_size(uint32 size, jtxt_val_t *jtxt_val)
+static inline uint32 add_val_size(uint32 size, const jtxt_val_t *jtxt_val)
 {
     switch (jtxt_val->type) {
         case JSON_BOOL:

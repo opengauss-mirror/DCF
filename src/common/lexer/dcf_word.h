@@ -226,7 +226,7 @@ status_t lex_match_keyword(struct st_lex *lex, word_t *word);
 status_t lex_match_hint_keyword(struct st_lex *lex, word_t *word);
 bool32 lex_match_subset(key_word_t *word_set, int32 count, word_t *word);
 bool32 lex_match_datetime_unit(word_t *word);
-const datatype_word_t *lex_match_datatype_words(const datatype_word_t *word_set, int32 count, word_t *word);
+const datatype_word_t *lex_match_datatype_words(const datatype_word_t *word_set, int32 count, const word_t *word);
 status_t lex_try_match_datatype(struct st_lex *lex, word_t *word, bool32 *matched);
 bool32 lex_check_datatype(word_t *word);
 

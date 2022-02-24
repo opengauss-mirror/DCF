@@ -76,82 +76,91 @@ typedef struct st_param_item {
 } param_item_t;
 
 static param_item_t g_parameters[] = {
-        // ------------------------      name  setdefaultvalue  verify    is_dynamic    range
-        [DCF_PARAM_ELECTION_TIMEOUT] = {"ELECTION_TIMEOUT", {.value_elc_timeout = CM_DEFAULT_ELC_TIMEOUT},
-             verify_param_election_timeout, CM_TRUE, "[1s,600s]", PARAM_UINT32},
-        [DCF_PARAM_HEARTBEAT_INTERVAL] = {"HEARTBEAT_INTERVAL", {.value_hb_interval = CM_DEFAULT_HB_INTERVAL},
-             NULL, CM_TRUE, "computed from election_timeout", PARAM_UINT32},
-        [DCF_PARAM_RUN_MODE] = {"RUN_MODE",
-             {.value_mode = ELECTION_AUTO}, verify_param_int_run_mode, CM_TRUE, "[0,2]", PARAM_ENUM},
-        [DCF_PARAM_INSTANCE_NAME] = {"INSTANCE_NAME",
-             {.instance_name = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
-        [DCF_PARAM_DATA_PATH] = {"DATA_PATH", {.data_path = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
-        [DCF_PARAM_LOG_PATH] = {"LOG_PATH", {.log_path = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
-        [DCF_PARAM_LOG_LEVEL] = {"LOG_LEVEL", {.value_loglevel = DEFAULT_LOG_LEVEL}, verify_param_log_level, CM_TRUE,
-             "RUN_ERR|RUN_WAR|RUN_INF|DEBUG_ERR|DEBUG_WAR|DEBUG_INF|OPER|TRACE|PROFILE", PARAM_UINT32},
-        [DCF_PARAM_LOG_BACKUP_FILE_COUNT] = {"LOG_BACKUP_FILE_COUNT",
-             {.value_log_backup_count = MD_DEFAULT_LOG_FILE_BACKUP_COUNT}, verify_param_log_backup_file_count, CM_TRUE,
-             "[1,100]", PARAM_UINT32},
-        [DCF_PARAM_MAX_LOG_FILE_SIZE] = {"MAX_LOG_FILE_SIZE", {.value_max_log_file_size = MD_DEFAULT_LOG_FILE_SIZE},
-             verify_param_max_log_file_size, CM_TRUE, "[1,1000]", PARAM_UINT32},
-        [DCF_PARAM_LOG_FILE_PERMISSION] = {"LOG_FILE_PERMISSION", {.value_log_file_permission = MD_LOG_FILE_PERMISSION},
-             verify_param_log_file_permission, CM_FALSE, "[600,640]", PARAM_UINT32},
-        [DCF_PARAM_LOG_PATH_PERMISSION] = {"LOG_PATH_PERMISSION", {.value_log_path_permission = MD_LOG_PATH_PERMISSION},
-             verify_param_log_path_permission, CM_FALSE, "[700,750]", PARAM_UINT32},
-        [DCF_PARAM_MEC_AGENT_THREAD_NUM] = {"MEC_AGENT_THREAD_NUM", {.agent_num = MEC_DEFALT_AGENT_NUM},
-              verify_param_int_agent_num, CM_FALSE, "[1,1000]", PARAM_UINT32},
-        [DCF_PARAM_MEC_REACTOR_THREAD_NUM] = {"MEC_REACTOR_THREAD_NUM", {.reactor_num = 1},
-             verify_param_int_reactor_num, CM_FALSE, "[1,100]", PARAM_UINT32},
-        [DCF_PARAM_MEC_CHANNEL_NUM] = {"MEC_CHANNEL_NUM", {.channel_num = 1}, verify_param_int_channel_num, CM_FALSE,
-             "[1,64]", PARAM_UINT32},
-        [DCF_PARAM_MEM_POOL_INIT_SIZE] = {"MEM_POOL_INIT_SIZE", {.buddy_init_size = (size_t) COMM_MEM_POOL_MIN_SIZE},
-             verify_param_size, CM_FALSE, "[32M,+)", PARAM_SIZE_T}, // unit MB
-        [DCF_PARAM_MEM_POOL_MAX_SIZE] = {"MEM_POOL_MAX_SIZE", {.buddy_max_size = (size_t) COMM_MEM_POOL_MAX_SIZE},
-             verify_param_size, CM_FALSE, "[32M,+)", PARAM_SIZE_T}, // unit MB
-        [DCF_PARAM_COMPRESS_ALGORITHM] = {"COMPRESS_ALGORITHM", {.compress = COMPRESS_NONE},
-             verify_param_int_compress_algorithm, CM_FALSE, "[0,1,2]", PARAM_UINT32},
-        [DCF_PARAM_COMPRESS_LEVEL] = {"COMPRESS_LEVEL", {.level = MEC_DEFAULT_COMPRESS_LEVEL},
-             verify_param_int_compress_level, CM_FALSE, "[1,22]", PARAM_UINT32},
-        [DCF_PARAM_SOCKET_TIMEOUT] = {"SOCKET_TIMEOUT", {.socket_timeout = CM_NETWORK_IO_TIMEOUT},
-             verify_param_socket_timeout, CM_FALSE, "[10,600000]", PARAM_UINT32},
-        [DCF_PARAM_CONNECT_TIMEOUT] = {"CONNECT_TIMEOUT", {.connect_timeout = CM_CONNECT_TIMEOUT},
-             verify_param_connect_timeout, CM_FALSE, "[10,600000]", PARAM_UINT32},
-        [DCF_REP_APPEND_THREAD_NUM] = {"REP_APPEND_THREAD_NUM", {.rep_append_thread_num = REP_DEFALT_APPEND_THREAS_NUM},
-             verify_param_int_append_thread_num, CM_FALSE, "[1,1000]", PARAM_UINT32},
-        [DCF_PARAM_MEC_FRAGMENT_SIZE] = {"MEC_FRAGMENT_SIZE", {.frag_size = MESSAGE_BUFFER_SIZE},
-             verify_param_mec_fragment_size, CM_FALSE, "[32K,10240K]", PARAM_UINT32}, // unit KB
-        [DCF_PARAM_STG_POOL_INIT_SIZE] = {"STG_POOL_INIT_SIZE", {.stg_pool_init_size = (size_t) STG_MEM_POOL_MIN_SIZE},
-             verify_param_size, CM_FALSE, "[32M,+]", PARAM_SIZE_T}, // unit MB
-        [DCF_PARAM_STG_POOL_MAX_SIZE] = {"STG_POOL_MAX_SIZE", {.stg_pool_max_size = (size_t) STG_MEM_POOL_MAX_SIZE},
-             verify_param_size, CM_FALSE, "[32M,+]", PARAM_SIZE_T}, // unit MB
-        [DCF_PARAM_MEC_POOL_MAX_SIZE] = {"MEC_POOL_MAX_SIZE", {.mec_pool_max_size = (size_t) MEC_MEM_POOL_MAX_SIZE},
-             verify_param_size, CM_FALSE, "[32M,+]", PARAM_SIZE_T}, // unit MB
-        [DCF_PARAM_MEC_BATCH_SIZE] = {"MEC_BATCH_SIZE", {.batch_size = DEFAULT_MEC_BATCH_SIZE},
-             verify_param_mec_batch_size, CM_FALSE, "[0,1024]", PARAM_UINT32},
-        [DCF_PARAM_CPU_THRESHOLD] = {"FLOW_CONTROL_CPU_THRESHOLD", {.cpu_load_threshold = CM_DEFAULT_CPU_THRESHOLD},
-             verify_param_int_common, CM_TRUE, "[0,+]", PARAM_UINT32}, // unit %
-        [DCF_PARAM_NET_QUEUE_THRESHOLD] = {"FLOW_CONTROL_NET_QUEUE_MESSAGE_NUM_THRESHOLD",
-             {.net_queue_threshold = CM_DEFAULT_NET_QUEUE_MESS_NUM}, verify_param_int_common, CM_TRUE, "[0,+]",
-             PARAM_UINT32}, // unit %
-        [DCF_PARAM_DISK_RAWAIT_THRESHOLD] = {"FLOW_CONTROL_DISK_RAWAIT_THRESHOLD", // unit us
-             {.disk_rawait_threshold = CM_DEFAULT_DISK_RAWAIT_THRESHOLD}, verify_param_int_common, CM_TRUE, "[0,+]",
-             PARAM_UINT32},
-        [DCF_PARAM_SSL_CA] = {"SSL_CA", {.ssl_ca = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
-        [DCF_PARAM_SSL_KEY] = {"SSL_KEY", {.ssl_key = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
-        [DCF_PARAM_SSL_CRL] = {"SSL_CRL", {.ssl_crl = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
-        [DCF_PARAM_SSL_CERT] = {"SSL_CERT", {.ssl_cert = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
-        [DCF_PARAM_SSL_CIPHER] = {"SSL_CIPHER", {.ssl_cipher = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
-        [DCF_PARAM_SSL_PWD_PLAINTEXT] = {"SSL_PWD_PLAINTEXT", {0}, verify_param_password, CM_FALSE, "", PARAM_STRING},
-        [DCF_PARAM_SSL_PWD_CIPHERTEXT] = {"SSL_PWD_CIPHERTEXT", {.ext_pwd = ""}, verify_param_string, CM_FALSE, "",
-             PARAM_STRING},
-        [DCF_PARAM_SSL_CERT_NOTIFY_TIME] = {"SSL_CERT_NOTIFY_TIME", {.ssl_cert_notify_time = 30},
-             verify_param_ssl_notify_time, CM_FALSE, "[7,180]", PARAM_UINT32},
-        [DCF_PARAM_DATA_FILE_SIZE] = {"DATA_FILE_SIZE", {.data_file_size = SIZE_M(500)},
-             verify_param_size, CM_FALSE, "[10M,2G]", PARAM_UINT32},
-        [DCF_PARAM_DN_FLOW_CONTROL_RTO] = {"DN_FLOW_CONTROL_RTO", {.dn_flow_control_rto = 0}, verify_param_int_common,
-             CM_TRUE, "[0,+]", PARAM_UINT32},
-        [DCF_PARAM_DN_FLOW_CONTROL_RPO] = {"DN_FLOW_CONTROL_RPO", {.dn_flow_control_rpo = 0}, verify_param_int_common,
-            CM_TRUE, "[0,+]", PARAM_UINT32}
+    // ------------------------      name  setdefaultvalue  verify    is_dynamic    range
+    [DCF_PARAM_ELECTION_TIMEOUT] = {"ELECTION_TIMEOUT", {.value_elc_timeout = CM_DEFAULT_ELC_TIMEOUT},
+         verify_param_election_timeout, CM_TRUE, "[1s,600s]", PARAM_UINT32},
+    [DCF_PARAM_AUTO_ELC_PRIORITY_EN] = {"AUTO_ELC_PRIORITY_EN", {.value_auto_elc_priority_en = CM_TRUE},
+    verify_param_int_auto_elc_prio_en, CM_TRUE, "[0,+]", PARAM_UINT32},
+    [DCF_PARAM_HEARTBEAT_INTERVAL] = {"HEARTBEAT_INTERVAL", {.value_hb_interval = CM_DEFAULT_HB_INTERVAL},
+         NULL, CM_TRUE, "computed from election_timeout", PARAM_UINT32},
+    [DCF_PARAM_ELECTION_SWITCH_THRESHOLD] = {"ELECTION_SWITCH_THRESHOLD",
+        {.value_elc_switch_thd = CM_DEFAULT_ELC_SWITCH_THD},
+        verify_param_int_common, CM_TRUE, "[0,+]", PARAM_UINT32}, // unit s
+    [DCF_PARAM_RUN_MODE] = {"RUN_MODE",
+         {.value_mode = ELECTION_AUTO}, verify_param_int_run_mode, CM_TRUE, "[0,2]", PARAM_ENUM},
+    [DCF_PARAM_INSTANCE_NAME] = {"INSTANCE_NAME",
+         {.instance_name = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
+    [DCF_PARAM_DATA_PATH] = {"DATA_PATH", {.data_path = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
+    [DCF_PARAM_LOG_PATH] = {"LOG_PATH", {.log_path = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
+    [DCF_PARAM_LOG_LEVEL] = {"LOG_LEVEL", {.value_loglevel = DEFAULT_LOG_LEVEL}, verify_param_log_level, CM_TRUE,
+         "RUN_ERR|RUN_WAR|RUN_INF|DEBUG_ERR|DEBUG_WAR|DEBUG_INF|OPER|TRACE|PROFILE", PARAM_UINT32},
+    [DCF_PARAM_LOG_FILENAME_FORMAT] = {"LOG_FILENAME_FORMAT", {.value_log_filename_format = LOG_FILENAME_DEFAULT},
+         verify_param_int_filename_format, CM_FALSE, "[0,1]", PARAM_ENUM},
+    [DCF_PARAM_LOG_BACKUP_FILE_COUNT] = {"LOG_BACKUP_FILE_COUNT",
+         {.value_log_backup_count = MD_DEFAULT_LOG_FILE_BACKUP_COUNT}, verify_param_log_backup_file_count, CM_TRUE,
+         "[1,100]", PARAM_UINT32},
+    [DCF_PARAM_MAX_LOG_FILE_SIZE] = {"MAX_LOG_FILE_SIZE", {.value_max_log_file_size = MD_DEFAULT_LOG_FILE_SIZE},
+         verify_param_max_log_file_size, CM_TRUE, "[1,1000]", PARAM_UINT32},
+    [DCF_PARAM_LOG_FILE_PERMISSION] = {"LOG_FILE_PERMISSION", {.value_log_file_permission = MD_LOG_FILE_PERMISSION},
+         verify_param_log_file_permission, CM_FALSE, "[600,640]", PARAM_UINT32},
+    [DCF_PARAM_LOG_PATH_PERMISSION] = {"LOG_PATH_PERMISSION", {.value_log_path_permission = MD_LOG_PATH_PERMISSION},
+         verify_param_log_path_permission, CM_FALSE, "[700,750]", PARAM_UINT32},
+    [DCF_PARAM_MEC_AGENT_THREAD_NUM] = {"MEC_AGENT_THREAD_NUM", {.agent_num = MEC_DEFALT_AGENT_NUM},
+          verify_param_int_agent_num, CM_FALSE, "[1,1000]", PARAM_UINT32},
+    [DCF_PARAM_MEC_REACTOR_THREAD_NUM] = {"MEC_REACTOR_THREAD_NUM", {.reactor_num = 1},
+         verify_param_int_reactor_num, CM_FALSE, "[1,100]", PARAM_UINT32},
+    [DCF_PARAM_MEC_CHANNEL_NUM] = {"MEC_CHANNEL_NUM", {.channel_num = 1}, verify_param_int_channel_num, CM_FALSE,
+         "[1,64]", PARAM_UINT32},
+    [DCF_PARAM_MEM_POOL_INIT_SIZE] = {"MEM_POOL_INIT_SIZE", {.buddy_init_size = (size_t) COMM_MEM_POOL_MIN_SIZE},
+         verify_param_size, CM_FALSE, "[32M,+)", PARAM_SIZE_T}, // unit MB
+    [DCF_PARAM_MEM_POOL_MAX_SIZE] = {"MEM_POOL_MAX_SIZE", {.buddy_max_size = (size_t) COMM_MEM_POOL_MAX_SIZE},
+         verify_param_size, CM_FALSE, "[32M,+)", PARAM_SIZE_T}, // unit MB
+    [DCF_PARAM_COMPRESS_ALGORITHM] = {"COMPRESS_ALGORITHM", {.compress = COMPRESS_NONE},
+         verify_param_int_compress_algorithm, CM_FALSE, "[0,1,2]", PARAM_UINT32},
+    [DCF_PARAM_COMPRESS_LEVEL] = {"COMPRESS_LEVEL", {.level = MEC_DEFAULT_COMPRESS_LEVEL},
+         verify_param_int_compress_level, CM_FALSE, "[1,22]", PARAM_UINT32},
+    [DCF_PARAM_SOCKET_TIMEOUT] = {"SOCKET_TIMEOUT", {.socket_timeout = CM_NETWORK_IO_TIMEOUT},
+         verify_param_socket_timeout, CM_FALSE, "[10,600000]", PARAM_UINT32},
+    [DCF_PARAM_CONNECT_TIMEOUT] = {"CONNECT_TIMEOUT", {.connect_timeout = CM_CONNECT_TIMEOUT},
+         verify_param_connect_timeout, CM_FALSE, "[10,600000]", PARAM_UINT32},
+    [DCF_REP_APPEND_THREAD_NUM] = {"REP_APPEND_THREAD_NUM", {.rep_append_thread_num = REP_DEFALT_APPEND_THREAS_NUM},
+         verify_param_int_append_thread_num, CM_FALSE, "[1,1000]", PARAM_UINT32},
+    [DCF_PARAM_MEC_FRAGMENT_SIZE] = {"MEC_FRAGMENT_SIZE", {.frag_size = MESSAGE_BUFFER_SIZE},
+         verify_param_mec_fragment_size, CM_FALSE, "[32K,10240K]", PARAM_UINT32}, // unit KB
+    [DCF_PARAM_STG_POOL_INIT_SIZE] = {"STG_POOL_INIT_SIZE", {.stg_pool_init_size = (size_t) STG_MEM_POOL_MIN_SIZE},
+         verify_param_size, CM_FALSE, "[32M,+]", PARAM_SIZE_T}, // unit MB
+    [DCF_PARAM_STG_POOL_MAX_SIZE] = {"STG_POOL_MAX_SIZE", {.stg_pool_max_size = (size_t) STG_MEM_POOL_MAX_SIZE},
+         verify_param_size, CM_FALSE, "[32M,+]", PARAM_SIZE_T}, // unit MB
+    [DCF_PARAM_MEC_POOL_MAX_SIZE] = {"MEC_POOL_MAX_SIZE", {.mec_pool_max_size = (size_t) MEC_MEM_POOL_MAX_SIZE},
+         verify_param_size, CM_FALSE, "[32M,+]", PARAM_SIZE_T}, // unit MB
+    [DCF_PARAM_MEC_BATCH_SIZE] = {"MEC_BATCH_SIZE", {.batch_size = DEFAULT_MEC_BATCH_SIZE},
+         verify_param_mec_batch_size, CM_FALSE, "[0,1024]", PARAM_UINT32},
+    [DCF_PARAM_CPU_THRESHOLD] = {"FLOW_CONTROL_CPU_THRESHOLD", {.cpu_load_threshold = CM_DEFAULT_CPU_THRESHOLD},
+         verify_param_int_common, CM_TRUE, "[0,+]", PARAM_UINT32}, // unit %
+    [DCF_PARAM_NET_QUEUE_THRESHOLD] = {"FLOW_CONTROL_NET_QUEUE_MESSAGE_NUM_THRESHOLD",
+         {.net_queue_threshold = CM_DEFAULT_NET_QUEUE_MESS_NUM}, verify_param_int_common, CM_TRUE, "[0,+]",
+         PARAM_UINT32}, // unit %
+    [DCF_PARAM_DISK_RAWAIT_THRESHOLD] = {"FLOW_CONTROL_DISK_RAWAIT_THRESHOLD", // unit us
+         {.disk_rawait_threshold = CM_DEFAULT_DISK_RAWAIT_THRESHOLD}, verify_param_int_common, CM_TRUE, "[0,+]",
+         PARAM_UINT32},
+    [DCF_PARAM_SSL_CA] = {"SSL_CA", {.ssl_ca = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
+    [DCF_PARAM_SSL_KEY] = {"SSL_KEY", {.ssl_key = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
+    [DCF_PARAM_SSL_CRL] = {"SSL_CRL", {.ssl_crl = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
+    [DCF_PARAM_SSL_CERT] = {"SSL_CERT", {.ssl_cert = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
+    [DCF_PARAM_SSL_CIPHER] = {"SSL_CIPHER", {.ssl_cipher = ""}, verify_param_string, CM_FALSE, "", PARAM_STRING},
+    [DCF_PARAM_SSL_PWD_PLAINTEXT] = {"SSL_PWD_PLAINTEXT", {0}, verify_param_password, CM_FALSE, "", PARAM_STRING},
+    [DCF_PARAM_SSL_PWD_CIPHERTEXT] = {"SSL_PWD_CIPHERTEXT", {.ext_pwd = ""}, verify_param_string, CM_FALSE, "",
+         PARAM_STRING},
+    [DCF_PARAM_SSL_CERT_NOTIFY_TIME] = {"SSL_CERT_NOTIFY_TIME", {.ssl_cert_notify_time = 30},
+         verify_param_ssl_notify_time, CM_FALSE, "[7,180]", PARAM_UINT32},
+    [DCF_PARAM_DATA_FILE_SIZE] = {"DATA_FILE_SIZE", {.data_file_size = SIZE_M(500)},
+         verify_param_size, CM_FALSE, "[10M,2G]", PARAM_UINT32},
+    [DCF_PARAM_DN_FLOW_CONTROL_RTO] = {"DN_FLOW_CONTROL_RTO", {.dn_flow_control_rto = 0}, verify_param_int_common,
+         CM_TRUE, "[0,+]", PARAM_UINT32},
+    [DCF_PARAM_DN_FLOW_CONTROL_RPO] = {"DN_FLOW_CONTROL_RPO", {.dn_flow_control_rpo = 0}, verify_param_int_common,
+        CM_TRUE, "[0,+]", PARAM_UINT32},
+    [DCF_PARAM_LOG_SUPPRESS_ENABLE] = {"LOG_SUPPRESS_ENABLE", {.log_suppress_enable = 1},
+        verify_param_log_suppress_enable, CM_TRUE, "[0,1]", PARAM_UINT32}
 };
 
 status_t get_param(dcf_param_t param_type, param_value_t *param_value)
@@ -410,6 +419,24 @@ status_t verify_param_int_common(dcf_param_t param_type, const char *param_value
     return CM_SUCCESS;
 }
 
+status_t elc_reload_priority();
+
+status_t verify_param_int_auto_elc_prio_en(dcf_param_t param_type, const char *param_value, param_value_t *out_value)
+{
+    uint32 val;
+    CM_CHECK_NULL_PTR(param_value);
+    if (cm_str2uint32(param_value, &val) != CM_SUCCESS) {
+        return CM_ERROR;
+    }
+    out_value->v_uint32 = val;
+
+    if (g_parameters[DCF_PARAM_AUTO_ELC_PRIORITY_EN].value.value_auto_elc_priority_en != CM_FALSE && val == CM_FALSE) {
+        return elc_reload_priority();
+    }
+
+    return CM_SUCCESS;
+}
+
 static inline status_t parse_and_check_int_range(dcf_param_t param_type, const char *param_value,
     uint32 minval, uint32 maxval, uint32 *out_val)
 {
@@ -522,8 +549,9 @@ status_t verify_param_int_compress_level(dcf_param_t param_type, const char *par
     }
     param_value_t *param_val = &g_parameters[DCF_PARAM_COMPRESS_ALGORITHM].value;
     if (param_val->compress == COMPRESS_LZ4 && val > MEC_MAX_COMPRESS_LEVEL_LZ4) {
-        out_value->v_uint32 = MEC_DEFAULT_COMPRESS_LEVEL;
-        return CM_ERROR;
+        // for lz4, if compress level large than 9, assign this value to max val 9
+        out_value->v_uint32 = MEC_MAX_COMPRESS_LEVEL_LZ4;
+        return CM_SUCCESS;
     }
     out_value->v_uint32 = val;
     return CM_SUCCESS;
@@ -532,6 +560,23 @@ status_t verify_param_int_compress_level(dcf_param_t param_type, const char *par
 status_t verify_param_int_run_mode(dcf_param_t param_type, const char *param_value, param_value_t *out_value)
 {
     if (parse_and_check_int_range(param_type, param_value, 0, ELECTION_CEIL - 1, &out_value->v_uint32)) {
+        return CM_ERROR;
+    }
+    return CM_SUCCESS;
+}
+
+status_t verify_param_log_suppress_enable(dcf_param_t param_type, const char *param_value, param_value_t *out_value)
+{
+    if (parse_and_check_int_range(param_type, param_value, 0, 1, &out_value->log_suppress_enable)) {
+        return CM_ERROR;
+    }
+    cm_log_param_instance()->log_suppress_enable = (bool32)out_value->log_suppress_enable;
+    return CM_SUCCESS;
+}
+
+status_t verify_param_int_filename_format(dcf_param_t param_type, const char *param_value, param_value_t *out_value)
+{
+    if (parse_and_check_int_range(param_type, param_value, 0, LOG_FILENAME_UNKNOW - 1, &out_value->v_uint32)) {
         return CM_ERROR;
     }
     return CM_SUCCESS;
@@ -625,7 +670,7 @@ status_t verify_param_string(dcf_param_t param_type, const char *param_value, pa
                 strlen((const char *) param_value));
             break;
         case DCF_PARAM_SSL_PWD_CIPHERTEXT:
-            if (!CM_IS_EMPTY_STR(g_parameters[DCF_PARAM_SSL_PWD_PLAINTEXT].value.inter_pwd.cipher_text)) {
+            if (g_parameters[DCF_PARAM_SSL_PWD_PLAINTEXT].value.inter_pwd.cipher_len > 0) {
                 LOG_DEBUG_ERR("ssl key password has already been set");
                 return CM_ERROR;
             }

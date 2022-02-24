@@ -79,7 +79,7 @@ static inline void biqueue_del_node(biqueue_node_t *node)
     node->prev = node->next = NULL;
 }
 
-static inline uint32 biqueue_empty(biqueue_t *que)
+static inline uint32 biqueue_empty(const biqueue_t *que)
 {
     return que->dumb.next == &que->dumb;
 }

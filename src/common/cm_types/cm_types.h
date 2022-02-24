@@ -130,8 +130,7 @@ typedef enum en_cm_type {
     /* The datatype below the CM_TYPE__DO_NOT_USE can be used as database DATATYPE.
     * In some extend, CM_TYPE__DO_NOT_USE represents the maximal number
     * of DATATYPE that Zenith are supported. The newly adding datatype
-    * must before CM_TYPE__DO_NOT_USE, and the type_id must be consecutive
-    * if you has question, please contact pufuan 00421579 */
+    * must before CM_TYPE__DO_NOT_USE, and the type_id must be consecutive */
     CM_TYPE__DO_NOT_USE = CM_TYPE_BASE + 44,
 
     /* The following datatypes are functional datatypes, which can help

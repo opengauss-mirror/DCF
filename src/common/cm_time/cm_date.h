@@ -84,7 +84,7 @@ void cm_now_detail(date_detail_t *detail);
 date_t cm_encode_date(const date_detail_t *detail);
 time_t cm_current_time();
 
-status_t cm_date2text_ex(date_t date, text_t *fmt, uint32 precision, text_t *text, uint32 max_len);
+status_t cm_date2text_ex(date_t date, const text_t *fmt, uint32 precision, text_t *text, uint32 max_len);
 
 static inline status_t cm_date2str_ex(date_t date, text_t *fmt_text, char *str, uint32 max_len)
 {

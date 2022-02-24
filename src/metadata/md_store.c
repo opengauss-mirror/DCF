@@ -77,7 +77,7 @@ status_t md_store_init()
     return CM_SUCCESS;
 }
 
-static status_t md_write_file(char *file, char *buf, int32 size, uint32 chksum)
+static status_t md_write_file(const char *file, const char *buf, int32 size, uint32 chksum)
 {
     int fd = -1;
     CM_RETURN_IFERR(cm_open_file(file, O_CREAT | O_RDWR | O_BINARY | O_TRUNC, &fd));
@@ -97,7 +97,7 @@ static status_t md_write_file(char *file, char *buf, int32 size, uint32 chksum)
     return status;
 }
 
-static status_t md_read_file(char *file, char **buf, int32 *size, bool32 *is_valid)
+static status_t md_read_file(const char *file, char **buf, int32 *size, bool32 *is_valid)
 {
     int32 fd = -1;
     int32 read_size;

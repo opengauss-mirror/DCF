@@ -141,12 +141,12 @@ void *galloc(uint64 size, mem_pool_t *mem);
 void *grealloc(void *p, uint64 size, mem_pool_t *mem);
 void gfree(void *p);
 void buddy_pool_deinit(mem_pool_t *mem);
-static inline uint64 mem_used_size(mem_pool_t *mem)
+static inline uint64 mem_used_size(const mem_pool_t *mem)
 {
     return mem->used_size;
 }
 
-static inline uint64 mem_max_size(mem_pool_t *mem)
+static inline uint64 mem_max_size(const mem_pool_t *mem)
 {
     return mem->max_size;
 }

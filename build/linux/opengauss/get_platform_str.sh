@@ -29,6 +29,12 @@ kernel=""
 if [ -f "/etc/euleros-release" ]
 then
 	kernel=$(cat /etc/euleros-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
+elif [ -f "/etc/openEuler-release" ]
+then
+	kernel=$(cat /etc/openEuler-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
+elif [ -f "/etc/centos-release" ]
+then
+	kernel=$(cat /etc/centos-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
 elif [ -f "/etc/kylin-release" ]
 then
 	kernel=$(cat /etc/kylin-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
@@ -74,12 +80,7 @@ fi
 if [ "$kernel"x = "suse"x ]
 then
 	version=$(lsb_release -r | awk -F ' ' '{print $2}')
-	if [ "$version"x = "12"x ]
-	then
-		plat_form_str=suse12_"$cpu_bit"
-	else
-		plat_form_str=suse11_sp1_"$cpu_bit"
-	fi
+	plat_form_str=suse${version%%\.*}_sp${version##*\.}_"$cpu_bit"
 fi
 
 ##################################################################################
@@ -89,6 +90,8 @@ fi
 if [ "$kernel"x = "euleros"x ]
 then
 	version=$(cat /etc/euleros-release | awk -F '(' '{print $2}'| awk -F ')' '{print $1}' | tr A-Z a-z)
+	version=${version%x86_64}
+	version=${version%aarch64}
 	plat_form_str=euleros2.0_"$version"_"$cpu_bit"
 fi
 

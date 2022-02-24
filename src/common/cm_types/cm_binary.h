@@ -52,7 +52,7 @@ static inline void cm_rtrim0_binary(binary_t *bin)
 }
 
 status_t cm_verify_hex_string(const text_t *text);
-status_t cm_bin2str(binary_t *bin, bool32 hex_prefix, char *str, uint32 buf_len);
+status_t cm_bin2str(const binary_t *bin, bool32 hex_prefix, char *str, uint32 buf_len);
 status_t cm_bin2text(const binary_t *bin, bool32 hex_prefix, text_t *text);
 status_t cm_str2bin(const char *str, bool32 hex_prefix, binary_t *bin, uint32 bin_max_sz);
 status_t cm_text2bin(const text_t *text, bool32 hex_prefix, binary_t *bin, uint32 bin_max_sz);

@@ -50,7 +50,7 @@ static const EVP_CIPHER* get_evp_cipher_by_id(uint32 alg_id)
     return cipher;
 }
 
-static status_t evp_set_padding(EVP_CIPHER_CTX *ctx, uchar *plain_text,
+static status_t evp_set_padding(EVP_CIPHER_CTX *ctx, const uchar *plain_text,
     uint32 plain_len, uint32 *block_size, uint32 *buffer_len, uchar **buffer)
 {
     /* open padding mode */

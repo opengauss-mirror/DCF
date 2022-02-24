@@ -4,41 +4,60 @@
 
 #### 一、工程说明
 ##### 1、编程语言：C
-##### 2、编译工程：cmake
+##### 2、编译工具：cmake或make，建议使用cmake
 ##### 3、目录说明：
 -   DCF：主目录，CMakeLists.txt为主工程入口；
 -   src:：源代码目录，按子目录划分模块解耦；
+-   platform：公司三方库（如安全函数库）
+-   open_source：第三方开源库
 -   test：测试用例
--   build：工程构建脚本
+    1. test/UT：单元测试使用gtest框架
+    2. test/consistency：一致性测试jepsen框架
+    3. test/test_perf：性能测试
 
-#### 二、编译指导
-##### 1、概述
+-   build：存放其他工程构建脚本（如用cmake工具生成的windows vc工程）、CI脚本等
+-   .cloudbuild：云龙流水线对接脚本
+-   doc：设计文档
+
+#### 二、编译指导与工程构建
+##### 概述
 编译DCF需要dcf和binarylibs两个组件。
 -   dcf：dcf的主要代码。可以从开源社区获取。
 -   binarylibs：依赖的第三方开源软件，你可以直接编译openGauss-third_party代码获取，也可以从开源社区下载已经编译好的并上传的一个副本。
-##### 2、操作系统和软件依赖要求
+##### 操作系统和软件依赖要求
 支持以下操作系统：
 -   CentOS 7.6（x86）
 -   openEuler-20.03-LTS<br>
 适配其他系统，可参照openGauss数据库编译指导<br>
 当前DCF依赖第三方软件有securec、lz4、zstd、openssl、cjson;
 编译dcf依赖的第三方软件要求与编译opengauss对依赖的第三方软件要求一致。
-##### 3、下载dcf
+##### 下载dcf
 可以从开源社区下载dcf和openGauss-third_party。
 可以通过以下网站获取编译好的binarylibs。
 https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.0.0/openGauss-third_party_binarylibs.tar.gz
-##### 4、编译第三方软件
+##### 编译第三方软件
 在编译dcf之前，需要先编译dcf依赖的开源及第三方软件。这些开源及第三方软件存储在openGauss-third_party代码仓库中，通常只需要构建一次。如果开源软件有更新，需要重新构建软件。<br>
 用户也可以直接从binarylibs库中获取开源软件编译和构建的输出文件。
-##### 5、代码编译
+##### 代码编译
 使用DCF/build/linux/opengauss/build.sh编译代码, 参数说明请见以下表格。<br>
 | 选项 | 参数               | 说明                                   |
-| ---  | :---              | :---                                   |
+| ---  |:---              | :---                                   |
 | -3rd | [binarylibs path] | 指定binarylibs路径。该路径必须是绝对路径。|
+| -m | [version_mode] | 编译目标版本，Debug或者Release。默认Release|
+| -t   | [build_tool]      | 指定编译工具，cmake或者make。默认cmake|
 
 现在只需使用如下命令即可编译：<br>
-[user@linux dcf]$ sh build.sh -3rd [binarylibs path]<br>
-完成编译后，动态库生成在DCF/lib目录中
+[user@linux ]$ sh build.sh -3rd [binarylibs path] -m Release -t cmake<br>
+完成编译后，动态库生成在DCF/output/lib目录中
+
+##### （其他可选编译方式）仅拉取dcf依赖的第三方软件编译代码
+###### 1、进入DCF/build/linux,编译开源第三方库，DCF依赖3rd库有securec、lz4、zstd、openssl。编译完生成lib和头文件在../DCF/library
+        sh compile_opensource.sh
+###### 2、进入DCF主目录,生成编译脚本
+        cmake -DCMAKE_BUILD_TYPE=Debug -DUSE32BIT=OFF CMakeLists.txt
+        cmake  -D CMAKE_BUILD_TYPE=Release -DUSE32BIT=OFF CMakeLists.txt
+###### 3、make all -sj8
+完成编译，动态库生成在DCF/lib目录中
 
 #### 三、接口说明
 ##### 1、API列表
@@ -181,6 +200,11 @@ typedef enum en_dcf_role {
 功能说明：写入数据，仅leader节点调用
 参数说明：buffer是待写入数据的buffer; length是待写入数据的size; key是待写入数据的key，可以唯一标识一条日志; index是leader分配的日志index
 
+- ___int dcf_universal_write(unsigned int stream_id, const char* buffer, unsigned int length, unsigned long long key, unsigned long long *index);___
+
+功能说明：写入数据，可在任意节点调用，但性能不如dcf_write。
+参数说明：buffer是待写入数据的buffer; length是待写入数据的size; key是待写入数据的key，可以唯一标识一条日志; index是leader分配的日志index
+
 - ___int dcf_read(unsigned int stream_id, unsigned long long index, char *buffer, unsigned int length);___
 
 功能说明：查询已写入的数据，成功返回实际读到的字节数，失败返回ERROR(-1)
@@ -283,12 +307,17 @@ typedef enum en_dcf_role {
 
 - ___int dcf_change_member_role(unsigned int stream_id, unsigned int node_id, dcf_role_t new_role, unsigned int wait_timeout_ms);___
 
-功能说明：改变节点角色，在leader调用可改变其他节点角色，在follower节点调用只能改变自己角色。成功返回SUCCESS(0)，失败返回ERROR(-1)，超时返回TIMEOUT(1),超时最终也可能成功，可以重试。
-参数说明：node_id为被修改角色节点id; new_role是节点新角色
+功能说明：改变节点角色，在leader调用可改变其他节点角色，非leader调用只能改变节点自身的角色。成功返回SUCCESS(0)，失败返回ERROR(-1)，超时返回TIMEOUT(1),超时最终也可能成功，可以重试。
+参数说明：node_id为被修改角色节点id; new_role是节点新角色。
+
+- ___int dcf_change_member(const char *change_str, unsigned int wait_timeout_ms);___
+
+功能说明：改变节点属性，在leader调用可改变其他节点的role/group/priority等属性，非leader调用只能改变节点自身的属性，一次可改变一个或多个属性。成功返回SUCCESS(0)，失败返回ERROR(-1)，超时返回TIMEOUT(1),超时最终也可能成功，可以重试。
+参数说明：change_str是需要修改的节点及属性列表，按照json字符串的格式进行配置，例如[{"stream_id":1,"node_id":1,"group":1,"priority":5,"role":"FOLLOWER"}]。
 
 - ___int dcf_promote_leader(unsigned int stream_id, unsigned int node_id, unsigned int wait_timeout_ms);___
 
-功能说明：推选指定节点为leader。在leader调用可推选其他节点，在follower节点调用只能推选自己。
+功能说明：推选指定节点为leader。在leader调用可推选其他节点，在follower节点调用只能推选自己。失败返回ERROR(-1)，成功返回SUCCESS(0)，返回SUCCESS仅代表推选命令下发成功，最终能否成功需要调用者查询。
 参数说明：node_id为被推选节点id; wait_timeout_ms是超时时间，单位ms，为0表示不阻塞leader直接发起推选。
 
 - ___int dcf_timeout_notify(unsigned int stream_id, unsigned int node_id);___
@@ -326,11 +355,36 @@ ___int int dcf_set_work_mode(unsigned int stream_id, dcf_work_mode_t work_mode, 
 功能说明：对指定节点暂停日志复制。调用成功返回SUCCESS，失败返回ERROR。
 参数说明：node_id指定暂停的节点; time_us是暂停时间(不超过1s)，单位us。
 
+- ___int dcf_demote_follower(unsigned int stream_id);___
+
+功能说明：对主节点进行降备
+参数说明：stream_id对应降备的stream。
+
+- ___int dcf_get_last_commit_index(unsigned int stream_id, unsigned int is_consensus, unsigned long long* index);___
+
+功能说明：获取最新 commit index 值
+参数说明：stream_id对应群组id，默认为1; is_consensus，是否要求一致性(true, false); index，出参commit index。
+
+- ___int dcf_get_current_term_and_role(unsigned int stream_id, unsigned long long* term, dcf_role_t* role);___
+
+功能说明：获取自己当前的任期和角色信息。
+参数说明：失败返回ERROR(-1)，成功返回SUCCESS(0)。返回SUCCESS时可以从出参term获取任期，从出参role获取角色。
+
+- ___int int dcf_set_election_priority(unsigned int stream_id, unsigned long long priority);___
+
+功能说明：设置节点的选举优先级。频繁调用该接口时内部有保护，1s内只能设置成功一次。
+参数说明：priority是需要设置的优先级值。
+
+- ___void dcf_set_timer(void *timer);___
+
+功能说明：注册上层组件的timer给DCF使用，timer需要与DCF内部gs_timer_t结构一致，一般内部组件间使用。
+参数说明：timer是上层组件timer地址。
+
 ##### 2、DEMO示例
 
 ```c{.line-num}
 
-参见：DCF/test/test_main目录
+参见：https://code.huawei.com/DDES/DCF/tree/master/test/test_main
 
 ```
 
@@ -339,7 +393,3 @@ ___int int dcf_set_work_mode(unsigned int stream_id, dcf_work_mode_t work_mode, 
 ##### 2、执行测试用例
 
 待续...
-
-#### 五、应用实例
-##### 1、GaussDB(for openGauss)使能paxos特性实践
-具体可参考：https://gitee.com/opengauss/blog/blob/master/content/zh/post/yanghaiyan/openGauss%E4%BD%BF%E8%83%BDpaxos%E7%89%B9%E6%80%A7%E5%AE%9E%E8%B7%B5.md

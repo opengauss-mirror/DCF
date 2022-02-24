@@ -64,12 +64,12 @@ static inline void bucket_reset(bucket_t *bucket)
     bucket->pos = bucket->offset = 0;
 }
 
-static inline bool32 bucket_empty(bucket_t *bucket)
+static inline bool32 bucket_empty(const bucket_t *bucket)
 {
     return (bucket->pos - bucket->offset) == 0;
 }
 
-static inline bool32 bucket_full(bucket_t *bucket)
+static inline bool32 bucket_full(const bucket_t *bucket)
 {
     return bucket->pos == BUCKET_SIZE;
 }
@@ -165,12 +165,12 @@ static inline void bucket_list_deinit(bucket_list_t *list)
     list->buckets = NULL;
 }
 
-static inline uint32 bucket_list_size(bucket_list_t *list)
+static inline uint32 bucket_list_size(const bucket_list_t *list)
 {
     return list->size;
 }
 
-static inline uint32 bucket_list_empty(bucket_list_t *list)
+static inline uint32 bucket_list_empty(const bucket_list_t *list)
 {
     return list->size == 0;
 }
@@ -272,7 +272,7 @@ static inline void bucket_list_sort(bucket_list_t *list, bucket_list_cmp_func_t 
     }
 
     for (uint32 j = 0; j < list->size - 1; j++) {
-        for (uint32 i = 0; i < list->size - 1 - j; i++) {
+        for (uint32 i = 0; i < ((list->size - 1) - j); i++) {
             pointer_t item1 = bucket_list_get(list, i);
             pointer_t item2 = bucket_list_get(list, i + 1);
             if (cmp_func(item1, item2) > 0) {

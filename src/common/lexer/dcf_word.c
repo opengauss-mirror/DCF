@@ -591,7 +591,7 @@ bool32 lex_match_datetime_unit(word_t *word)
     return lex_match_subset(g_datetime_unit_words, ELEMENT_COUNT(g_datetime_unit_words), word);
 }
 
-const datatype_word_t *lex_match_datatype_words(const datatype_word_t *word_set, int32 count, word_t *word)
+const datatype_word_t *lex_match_datatype_words(const datatype_word_t *word_set, int32 count, const word_t *word)
 {
     int32 begin_pos, end_pos, mid_pos, cmp_result;
     const datatype_word_t *cmp_word = NULL;

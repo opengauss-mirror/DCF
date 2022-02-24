@@ -36,12 +36,14 @@ status_t elc_vote_req(uint32 stream_id, uint32 vote_flag);
 status_t elc_vote_proc(mec_message_t *pack);
 status_t elc_vote_ack_proc(mec_message_t *pack);
 
-status_t elc_hb_req(uint32 stream_id, mec_command_t cmd);
-status_t elc_hb_proc(mec_message_t *pack);
-status_t elc_hb_ack_proc(mec_message_t *pack);
+status_t elc_send_status_info(uint32 stream_id);
+status_t elc_status_check_req_proc(mec_message_t *pack);
+status_t elc_status_check_ack_proc(mec_message_t *pack);
 
 status_t elc_promote_req(uint32 stream_id, uint32 node_id);
 status_t elc_promote_proc(mec_message_t *pack);
+
+bool32 elc_need_demote_follow(uint32 stream_id, timespec_t now, uint32 elc_timeout_cnt);
 
 #ifdef __cplusplus
 }

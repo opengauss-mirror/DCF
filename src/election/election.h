@@ -43,10 +43,18 @@ uint64 elc_get_current_term(uint32 stream_id);
 status_t elc_judge_term(uint32 stream_id, uint64 term);
 
 dcf_role_t elc_get_node_role(uint32 stream_id);
+status_t elc_get_current_term_and_role(uint32 stream_id, uint64 *term, dcf_role_t *role);
+void elc_set_my_priority(uint32 stream_id, uint64 priority);
+uint64 elc_get_my_priority(uint32 stream_id);
+uint32 elc_get_my_group(uint32 stream_id);
+
 status_t elc_update_node_role(uint32 stream_id);
+status_t elc_update_node_group(uint32 stream_id);
+status_t elc_update_node_priority(uint32 stream_id);
 
 uint32 elc_get_votefor(uint32 stream_id);
 
+uint32 elc_get_old_leader(uint32 stream_id);
 status_t elc_demote_follower(uint32 stream_id);
 
 status_t elc_promote_leader(uint32 stream_id, uint32 node_id);
@@ -64,6 +72,7 @@ status_t elc_get_quorum(uint32 stream_id, uint32* quorum);
 status_t elc_is_voter(uint32 stream_id, uint32 node_id, bool32* is_voter);
 bool32 elc_is_notify_thread_closed();
 status_t elc_node_is_healthy(uint32 stream_id, dcf_role_t* node_role, unsigned int* is_healthy);
+status_t elc_node_voting_weight(uint32 stream_id, uint32 node_id, uint32* voting_weight);
 
 #ifdef __cplusplus
 }
