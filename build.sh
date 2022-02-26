@@ -19,8 +19,12 @@
 
 set -e
 
-DCF_DIR=$(pwd)
-BUILD_DIR="${DCF_DIR}/build/linux/opengauss"
+DCF_DIR=$(cd "$1"; pwd)
+BUILD_DIR="${DCF_DIR}/build/linux"
 
 cd ${BUILD_DIR}
-sh -x build.sh $@
+sh -x compile_opensource.sh
+cd ${DCF_DIR}
+cmake -D CMAKE_BUILD_TYPE=Release -DUSE32BIT=OFF -DUT=ON ./CMakeLists.txt
+make clean
+make all

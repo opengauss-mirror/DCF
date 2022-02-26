@@ -45,7 +45,7 @@ status_t switch_segment_to(segment_t *segment, bool32 to_open)
     return CM_SUCCESS;
 }
 
-static inline void decode_entry_head(char *buf, entry_head_t *head)
+static inline void decode_entry_head(const char *buf, entry_head_t *head)
 {
     head->term  = *(uint64*)(buf + OFFSET_OF_TERM);
     head->index = *(uint64*)(buf + OFFSET_OF_INDEX);
@@ -189,9 +189,9 @@ static status_t segment_get_log_meta(segment_t *segment, uint64 index, log_meta_
             cm_unlatch(&segment->latch, NULL);
             return CM_ERROR;
         }
-        meta->size = (uint32)(next.offset - curr.offset - ENTRY_HEAD_SIZE);
+        meta->size = (uint32)((next.offset - curr.offset) - ENTRY_HEAD_SIZE);
     } else {
-        meta->size = (uint32)(segment->size - curr.offset - ENTRY_HEAD_SIZE);
+        meta->size = (uint32)((segment->size - curr.offset) - ENTRY_HEAD_SIZE);
     }
     cm_unlatch(&segment->latch, NULL);
     return CM_SUCCESS;

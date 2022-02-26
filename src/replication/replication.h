@@ -44,11 +44,17 @@ status_t rep_write(uint32 stream_id, const char* buffer, uint32 length, uint64 k
 // called by storage when log is accepted
 void rep_accepted_trigger(uint32 stream_id, uint64 term, uint64 index, int err_code, entry_type_t type);
 
+// called by election when try promote higher-priority leader
+void rep_try_promote_prio_leader(uint32 stream_id, uint32 prio_leader);
+
 // called by election when current node becames leader
 status_t rep_role_notify(uint32 stream_id, dcf_role_t old_role, dcf_role_t new_role);
 
 // get current node's commit index
 uint64 rep_get_commit_index(uint32 stream_id);
+
+// get current node's data log commit index
+uint64 rep_get_data_commit_index(uint32 stream_id);
 
 // get current node's last log index
 uint64 rep_get_last_index(uint32 stream_id);
@@ -65,6 +71,7 @@ int rep_register_consensus_notify(entry_type_t type, usr_cb_consensus_notify_t c
 uint64 rep_follower_get_leader_last_idx(uint32 stream_id);
 
 status_t set_node_status(uint32 stream_id, node_status_t status, uint32 block_time_ms);
+void clear_node_block_status(uint32 stream_id);
 
 void rep_set_pause_time(uint32 stream_id, uint32 node_id, uint32 pause_time);
 uint32 rep_get_pause_time(uint32 stream_id, uint32 node_id);

@@ -105,6 +105,11 @@ static void try_process_multi_channels(agent_t *agent)
         }
     }
 
+    if (agent->mode >= MODE_END || agent->pipe->attach[agent->mode].job == NULL) {
+        LOG_DEBUG_ERR("[MEC]agent mode=%u or job=%p err.", agent->mode, agent->pipe->attach[agent->mode].job);
+        return;
+    }
+
     pipe = agent->pipe;
     pipe->attach[agent->mode].spid = cm_get_current_thread_id();
 

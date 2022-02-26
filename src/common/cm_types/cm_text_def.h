@@ -131,7 +131,7 @@ typedef union un_text_buf {
         CM_STR_GET_FIRST((str), (out)); \
         CM_STR_REMOVE_FIRST((str));     \
     } while (0)
-#define CM_STR_BEGIN_WITH(str1, str2)     strncmp((str1), (str2), strlen(str2)) == 0
+#define CM_STR_BEGIN_WITH(str1, str2)     (strncmp((str1), (str2), strlen(str2)) == 0)
 #define CM_IS_ENCLOSED_WITH_CHAR(text, c) ((text)->len >= 2 && (text)->str[0] == (c) &&  \
         (text)->str[(text)->len - 1] == (c))
 #define CM_STR_EQUAL(str1, str2) (strlen(str1) == strlen(str2) && strncmp((str1), (str2), strlen(str2)) == 0)
@@ -150,10 +150,10 @@ typedef union un_text_buf {
 #define CM_GET_CHAR(text, i) ((text)->str[(i)])
 
 /** Append a char at the end of text */
-#define CM_TEXT_APPEND(text, c) (text)->str[(text)->len++] = (c)
+#define CM_TEXT_APPEND(text, c) ((text)->str[(text)->len++] = (c))
 
 /** Clear all characters of the text */
-#define CM_TEXT_CLEAR(text) (text)->len = 0
+#define CM_TEXT_CLEAR(text) ((text)->len = 0)
 
 #define UPPER(c) (((c) >= 'a' && (c) <= 'z') ? ((c) - 32) : (c))
 #define LOWER(c) (((c) >= 'A' && (c) <= 'Z') ? ((c) + 32) : (c))

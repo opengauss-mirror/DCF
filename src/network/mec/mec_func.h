@@ -47,7 +47,6 @@ extern "C" {
 #define MEC_CHANNEL_ID(id) (uint8)((id) & 0x00FF)
 
 #define MEC_URL_BUFFER_SIZE     (CM_HOST_NAME_BUFFER_SIZE + 16)
-#define MEC_CHKSUM_SIZE         (sizeof(uint64))
 
 
 #define MEC_ACTL_MSG_BUFFER_SIZE(profile) (uint64)((profile)->frag_size + MEC_BUFFER_RESV_SIZE + \
@@ -200,7 +199,7 @@ typedef struct st_fragment_bucket {
 } fragment_bucket_t;
 
 #define FRAGMENT_BUCKETS          (uint32) SIZE_K(1)
-#define FRAGMENT_MAX_EXTENTS      (1024)
+#define FRAGMENT_MAX_EXTENTS      (64)
 #define FRAGMENT_EXTENT           (1024)
 #define FRAGMENT_MAX_ITEMS        (FRAGMENT_MAX_EXTENTS * FRAGMENT_EXTENT)
 
@@ -357,7 +356,7 @@ status_t init_mec_profile_inst(mec_profile_t *profile);
 
 void release_fragment_ctrl(fragment_ctrl_t *ctrl, uint32 del_sn);
 status_t concat_fragment_pack(fragment_ctrl_t *ctrl, mec_message_head_t *head);
-fragment_ctrl_t *find_fragment_ctrl(fragment_bucket_t *bucket, fragment_key_t *key);
+fragment_ctrl_t *find_fragment_ctrl(fragment_bucket_t *bucket, const fragment_key_t *key);
 status_t insert_fragment_pack(mec_message_head_t *head, fragment_bucket_t *bucket);
 status_t fragment_alloc_ctrl(fragment_ctrl_t **ctrl);
 void fragment_free_ctrl(fragment_ctrl_t *ctrl);

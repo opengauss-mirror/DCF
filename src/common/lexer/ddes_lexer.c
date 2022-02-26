@@ -366,8 +366,6 @@ static num_errno_t lex_fetch_numpart(lex_t *lex, word_t *word)
  * + If 'E' in the middle of the word, then the word is a number word;
  * + If 'E' is at the end of the word, the word is a size word;
  * + If two or more indicators are found, an error will be returned.
- *
- * @author Comment added by pufuan 00421579, 2018/01/15
  */
 static status_t lex_fetch_num(lex_t *lex, word_t *word)
 {
@@ -376,7 +374,7 @@ static status_t lex_fetch_num(lex_t *lex, word_t *word)
 
     err_no = lex_fetch_numpart(lex, word);
     if (err_no != NERR_SUCCESS) {
-        LEX_THROW_ERROR_EX(word->loc, ERR_LEX_INVALID_NUMBER, cm_get_num_errinfo(err_no));
+        LEX_THROW_ERROR_EX(word->loc, ERR_LEX_INVALID_NUMBER, cm_get_num_errinfo(err_no), "fetch number failed");
         return CM_ERROR;
     }
 
@@ -707,7 +705,7 @@ static status_t lex_expected_fetch_extra(lex_t *lex, word_t *ex_word)
     return CM_SUCCESS;
 }
 
-static bool32 lex_is_unnamable_function(word_t *word)
+static bool32 lex_is_unnamable_function(const word_t *word)
 {
     return (word->type == WORD_TYPE_DATATYPE && cm_strcmpni(word->text.str, "char", strlen("char")) == 0) ||
            (word->type == WORD_TYPE_KEYWORD && cm_strcmpni(word->text.str, "insert", strlen("insert")) == 0) ||
@@ -1184,7 +1182,7 @@ status_t lex_fetch_array(lex_t *lex, word_t *word)
     }
 
     if (curr != ']') {
-        LEX_THROW_ERROR(LEX_LOC, ERR_LEX_INVALID_ARRAY_FORMAT);
+        LEX_THROW_ERROR(LEX_LOC, ERR_LEX_INVALID_ARRAY_FORMAT, "not end character ]");
         return CM_ERROR;
     } else {
         word->text.len = (uint32)(lex->curr_text->str - word->text.str);
@@ -1367,7 +1365,7 @@ status_t lex_extract_first(lang_text_t *text, word_t *word)
     return lex_expected_fetch(&lex, word);
 }
 
-status_t lex_extract_first_ex(lang_text_t *text, word_t *word)
+status_t lex_extract_first_ex(const lang_text_t *text, word_t *word)
 {
     lex_t lex;
 

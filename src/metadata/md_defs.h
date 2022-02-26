@@ -52,7 +52,10 @@ extern "C" {
 #define CM_MD_MISMATCH_REP_INTERVAL 5000 // ms
 
 #define CM_DEFAULT_ELC_TIMEOUT 3000 // ms
+#define CM_DEFAULT_ELC_PRIORITY 0
 #define CM_DEFAULT_HB_INTERVAL 1000 // ms
+#define CM_DEFAULT_ELC_SWITCH_THD 0
+
 #define CM_DEFAULT_CPU_THRESHOLD 100 // unit (%)
 #define CM_MAX_CPU_THRESHOLD 100 // unit (%)
 
@@ -64,6 +67,8 @@ extern "C" {
 #define CM_SSL_NOTI_TIME_MAX   180
 #define CM_MIN_ELC_TIMEOUT     1   // s
 #define CM_MAX_ELC_TIMEOUT     600 // s
+#define CM_ELC_NORS_WEIGHT     1
+#define CM_DEFAULT_GROUP_ID    0
 
 #define SPLIT_CHR_LOG_LEVEL '|'
 
@@ -75,17 +80,48 @@ extern "C" {
 #define MD_GET_STREAMS_NODE(streams, stream_id, node_id) \
     MD_GET_STREAM_NODE(MD_GET_STREAM((streams), (stream_id)), (node_id))
 
+/* every option use one bit of flags */
+#define OP_FLAG_NONE                 0x0000
+#define OP_FLAG_ADD                  0x0001  // add member
+#define OP_FLAG_REMOVE               0x0002  // remove member
+#define OP_FLAG_CHANGE_ROLE          0x0004  // change member role
+#define OP_FLAG_CHANGE_GROUP         0x0008  // change member group
+#define OP_FLAG_CHANGE_PRIORITY      0x0010  // change member priority
+#define OP_FLAG_ALL   ((OP_FLAG_ADD) | (OP_FLAG_REMOVE) | (OP_FLAG_CHANGE_ROLE) | \
+                            (OP_FLAG_CHANGE_GROUP) | (OP_FLAG_CHANGE_PRIORITY))
+
+#define NEED_ADD(flag) ((flag) & OP_FLAG_ADD)
+#define NEED_REMOVE(flag) ((flag) & OP_FLAG_REMOVE)
+#define NEED_CHANGE_ROLE(flag) ((flag) & OP_FLAG_CHANGE_ROLE)
+#define NEED_CHANGE_GROUP(flag) ((flag) & OP_FLAG_CHANGE_GROUP)
+#define NEED_CHANGE_PRIORITY(flag) ((flag) & OP_FLAG_CHANGE_PRIORITY)
+
 typedef struct st_dcf_node {
     uint32 node_id;
     char ip[CM_MAX_IP_LEN];
     uint32 port;
     dcf_role_t default_role;
+    uint32 voting_weight;
+    uint32 group;
+    uint64 priority;
 } dcf_node_t;
+
+typedef struct st_dcf_change_member {
+    uint32 op_type;
+    dcf_role_t new_role;
+    uint32 new_group;
+    uint64 new_priority;
+} dcf_change_member_t;
 
 typedef struct st_dcf_node_role {
     uint32 node_id;
     dcf_role_t default_role;
 } dcf_node_role_t;
+
+typedef struct st_dcf_node_weight {
+    uint64 index;
+    uint32 weight;
+} dcf_node_weight_t;
 
 typedef struct st_stream_t {
     uint32 stream_id;
@@ -107,12 +143,15 @@ typedef enum en_entry_type {
 typedef enum en_dcf_param {
     DCF_PARAM_UNKNOWN = 0,
     DCF_PARAM_ELECTION_TIMEOUT,
+    DCF_PARAM_AUTO_ELC_PRIORITY_EN,
     DCF_PARAM_HEARTBEAT_INTERVAL,
+    DCF_PARAM_ELECTION_SWITCH_THRESHOLD,
     DCF_PARAM_RUN_MODE,
     DCF_PARAM_INSTANCE_NAME,
     DCF_PARAM_DATA_PATH,
     DCF_PARAM_LOG_PATH,
     DCF_PARAM_LOG_LEVEL,
+    DCF_PARAM_LOG_FILENAME_FORMAT,
     DCF_PARAM_LOG_BACKUP_FILE_COUNT,
     DCF_PARAM_MAX_LOG_FILE_SIZE,
     DCF_PARAM_LOG_FILE_PERMISSION,
@@ -146,9 +185,15 @@ typedef enum en_dcf_param {
     DCF_PARAM_DATA_FILE_SIZE,
     DCF_PARAM_DN_FLOW_CONTROL_RTO,
     DCF_PARAM_DN_FLOW_CONTROL_RPO,
+    DCF_PARAM_LOG_SUPPRESS_ENABLE,
     DCF_PARAM_CEIL,
 } dcf_param_t;
 
+typedef enum en_log_filename_format {
+    LOG_FILENAME_DEFAULT = 0,
+    LOG_FILENAME_SEPARATED,
+    LOG_FILENAME_UNKNOW
+} log_filename_format_t;
 
 typedef enum en_param_run_mode {
     ELECTION_AUTO,
@@ -159,11 +204,14 @@ typedef enum en_param_run_mode {
 
 typedef union un_param_value {
     uint32 value_elc_timeout;
+    uint32 value_auto_elc_priority_en;
     uint32 value_hb_interval;
+    uint32 value_elc_switch_thd;
     param_run_mode_t value_mode;
     char instance_name[CM_MAX_NAME_LEN];
     char data_path[CM_MAX_PATH_LEN];
     char log_path[CM_MAX_LOG_HOME_LEN];
+    uint32 value_log_filename_format;
     uint32 value_loglevel;
     uint32 value_log_backup_count;
     uint32 value_max_log_file_size;
@@ -203,6 +251,7 @@ typedef union un_param_value {
     char ext_pwd[CM_PASSWORD_BUFFER_SIZE];
     uint32 dn_flow_control_rto;
     uint32 dn_flow_control_rpo;
+    uint32 log_suppress_enable;
     cipher_t inter_pwd;
 } param_value_t;
 

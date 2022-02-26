@@ -118,6 +118,7 @@ typedef enum en_format_id {
 #define MILLISECS_PER_SECOND    1000U
 #define MICROSECS_PER_MILLISEC  1000U
 #define MICROSECS_PER_SECOND    1000000U
+#define NANOSECS_PER_MICROSECS  1000U
 #define DEFAULT_DIGIT_RADIX     10
 #define MICROSECS_PER_SECOND_LL 1000000LL
 
@@ -148,7 +149,7 @@ typedef struct st_append_date_text_res {
 } append_date_text_res_t;
 
 // <format_id, func>
-typedef errno_t (* append_date_text_func)(append_date_text_para_t* para, append_date_text_res_t* res);
+typedef errno_t (* append_date_text_func)(const append_date_text_para_t* para, append_date_text_res_t* res);
 
 typedef struct st_append_date_pair {
     uint32 format_id;
@@ -162,61 +163,61 @@ typedef struct st_append_date_pair {
 
 extern const t_append_date_pair g_append_date_text_arr[];
 
-errno_t cm_fmt_indicator(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_indicator(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_dq_text(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_dq_text(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_dot_to_colon(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_dot_to_colon(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_x(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_x(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_day_name(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_day_name(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_day_abbr_name(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_day_abbr_name(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_month_abbr_name(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_month_abbr_name(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_month_rm(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_month_rm(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_month_name(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_month_name(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_year1_to_year4(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_year1_to_year4(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_century(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_century(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_day_of_week(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_day_of_week(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_hour_of_day12(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_hour_of_day12(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_hour_of_day24(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_hour_of_day24(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_quarter(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_quarter(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_second(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_second(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_second_pass(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_second_pass(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_week_of_year(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_week_of_year(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_week_of_month(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_week_of_month(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_day_of_month(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_day_of_month(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_day_of_year(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_day_of_year(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_frac_second1_to_second3(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_frac_second1_to_second3(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_frac_second4_to_second6(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_frac_second4_to_second6(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_frac_sec_var_len(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_frac_sec_var_len(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_minute(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_minute(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_month(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_month(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_tz_hour(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_tz_hour(const append_date_text_para_t* para, append_date_text_res_t* res);
 
-errno_t cm_fmt_tz_minute(append_date_text_para_t* para, append_date_text_res_t* res);
+errno_t cm_fmt_tz_minute(const append_date_text_para_t* para, append_date_text_res_t* res);
 
 #ifdef __cplusplus
 }

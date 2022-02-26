@@ -79,10 +79,12 @@ rep_monitor_statistics_t g_leader_monitor_statistics;
 #define HIGH_LEVEL_TIMES    (g_leader_monitor_statistics.high_level_times)
 
 #define REP_FC_TIME_UNIT       100  // 100us unit
-#define REP_FC_INIT_VAL        5
+#define REP_FC_INIT_VAL        10
 #define REP_FC_SAMP_PERIOD     1
 #define REP_FC_CTRL_PERIOD     5
 #define REP_FC_MAX_VAL         100
+#define FC_MIN_MAX             2
+#define REP_FC_CTRL_THD        4000 // reduce fc_val if commit_delay less than this threshold
 static volatile uint32 g_rep_flow_ctrl_val = REP_FC_INIT_VAL;
 static uint32 g_flow_ctrl_type = FC_NONE;
 
@@ -131,21 +133,24 @@ status_t rep_leader_init()
     CM_RETURN_IFERR(md_get_stream_list(streams, &stream_count));
     for (uint32 i = 0; i < stream_count; i++) {
         uint32 stream_id = streams[i];
-        CM_RETURN_IFERR(rep_leader_reset(stream_id));
+        uint32 node_num = 0;
+        CM_RETURN_IFERR(md_get_stream_nodes_count(stream_id, &node_num));
+        if (node_num == 1) { // 1 node mode
+            CM_RETURN_IFERR(rep_leader_reset(stream_id));
+        }
     }
 
     CM_RETURN_IFERR(rep_monitor_init());
-    CM_RETURN_IFERR(cm_create_thread(rep_leader_monitor_entry, SIZE_M(CM_2X_FIXED), NULL, &g_leader_monitor_thread));
+    CM_RETURN_IFERR(cm_create_thread(rep_leader_monitor_entry, 0, NULL, &g_leader_monitor_thread));
 
     for (uint64 i = 0; i < g_append_thread_num; i++) {
-        CM_RETURN_IFERR(cm_create_thread(rep_appendlog_thread_entry, SIZE_M(CM_2X_FIXED),
+        CM_RETURN_IFERR(cm_create_thread(rep_appendlog_thread_entry, 0,
             (void*)i, &g_appendlog_thread[i]));
     }
 
     for (uint32 i = 0; i < stream_count; i++) {
         uint32 stream_id = streams[i];
         if (I_AM_LEADER(stream_id)) {
-            (void)set_node_status(stream_id, NODE_BLOCKED, 0);
             /* new leader must wait all logs applied and then set can_write flag */
             CM_RETURN_IFERR(rep_wait_all_logs_applied(stream_id));
             rep_set_can_write_flag(stream_id, CM_TRUE);
@@ -166,25 +171,64 @@ void rep_leader_deinit()
     LOG_RUN_INF("rep_leader_deinit finished");
 }
 
+status_t rep_wait_node_log_catchup(uint32 stream_id, uint32 node_id)
+{
+    uint64 leader_last_index = rep_get_last_index(stream_id);
+    uint64 node_last_index = rep_leader_get_match_index(stream_id, node_id).index;
+    uint64 node_old_last_index = 0;
+    timespec_t begin = cm_clock_now();
+    timespec_t last = cm_clock_now();
+    while (node_last_index != leader_last_index) {
+        if ((cm_clock_now() - last) > MICROSECS_PER_SECOND * CM_10X_FIXED) {
+            LOG_RUN_INF("[REP]already wait for %lld seconds,leader_last_index=%llu,node_last_index=%llu",
+                        (cm_clock_now() - begin) / MICROSECS_PER_SECOND, leader_last_index, node_last_index);
+            last = cm_clock_now();
+
+            if (node_last_index == node_old_last_index) {
+                LOG_RUN_WAR("[REP]wait_node_log_catchup failed, node=%u,leader_last_index=%llu,"
+                    "node_last_index=%llu,node_old_last_index=%llu",
+                    node_id, leader_last_index, node_last_index, node_old_last_index);
+                return CM_ERROR;
+            }
+            node_old_last_index = node_last_index;
+        }
+        cm_sleep(CM_SLEEP_1_FIXED);
+        if (!I_AM_LEADER(stream_id)) {
+            LOG_RUN_INF("[REP]wait_node_log_catchup:I'm not leader now.");
+            return CM_ERROR;
+        }
+        if (elc_is_notify_thread_closed() == CM_TRUE) {
+            LOG_RUN_INF("[REP]wait_node_log_catchup:status_notify_thread closed, stop now.");
+            return CM_ERROR;
+        }
+        leader_last_index = rep_get_last_index(stream_id);
+        node_last_index = rep_leader_get_match_index(stream_id, node_id).index;
+    }
+
+    LOG_DEBUG_INF("[REP]wait_node_log_catchup OK. leader_last_index=%llu, node_last_index=%llu",
+        leader_last_index, node_last_index);
+    return CM_SUCCESS;
+}
+
 status_t rep_wait_all_logs_applied(uint32 stream_id)
 {
     uint64 last_index = rep_get_last_index(stream_id);
     uint64 applied_index = stg_get_applied_index(stream_id);
-    date_t begin = g_timer()->now;
-    date_t last = g_timer()->now;
+    timespec_t begin = cm_clock_now();
+    timespec_t last = cm_clock_now();
     while (last_index != applied_index) {
-        if ((g_timer()->now - last) > MICROSECS_PER_SECOND) {
+        if ((cm_clock_now() - last) > MICROSECS_PER_SECOND) {
             LOG_RUN_INF("[REP]already wait for %lld seconds,last_index=%llu,applied_index=%llu",
-                        (g_timer()->now - begin) / MICROSECS_PER_SECOND, last_index, applied_index);
-            last = g_timer()->now;
+                        (cm_clock_now() - begin) / MICROSECS_PER_SECOND, last_index, applied_index);
+            last = cm_clock_now();
         }
-        cm_sleep(1);
+        cm_sleep(CM_SLEEP_1_FIXED);
         if (!I_AM_LEADER(stream_id)) {
             LOG_RUN_INF("[REP]wait_all_logs_applied:I'm not leader now.");
             return CM_ERROR;
         }
         if (elc_is_notify_thread_closed() == CM_TRUE) {
-            LOG_RUN_INF("[REP]status_notify_thread closed, stop now.");
+            LOG_RUN_INF("[REP]wait_all_logs_applied:status_notify_thread closed, stop now.");
             return CM_ERROR;
         }
         last_index = rep_get_last_index(stream_id);
@@ -238,7 +282,7 @@ status_t rep_leader_reset(uint32 stream_id)
             CM_RETURN_IFERR(md_set_status(META_NORMAL));
             return CM_ERROR;
         }
-        if (rep_write(stream_id, md_buf, size, 0, ENTRY_TYPE_CONF, NULL) != CM_SUCCESS) {
+        if (rep_write(stream_id, md_buf, size, OP_FLAG_ALL, ENTRY_TYPE_CONF, NULL) != CM_SUCCESS) {
             CM_FREE_PTR(md_buf);
             CM_RETURN_IFERR(md_set_status(META_NORMAL));
             return CM_ERROR;
@@ -254,17 +298,8 @@ status_t rep_leader_reset(uint32 stream_id)
     return CM_SUCCESS;
 }
 
-static void rep_release_entrys(log_entry_t** entrys, uint64 count)
-{
-    for (uint64 j = 0; j < count; j++) {
-        if (entrys[j] != NULL) {
-            stg_entry_dec_ref(entrys[j]);
-        }
-    }
-}
-
-static inline void rep_init_appendlog_req(uint32 stream_id, rep_apendlog_req_t* appendlog_req,
-    uint64 pre_log_index, uint64 last_log_index, uint64 log_count)
+static inline void rep_init_appendlog_head(uint32 stream_id, rep_apendlog_req_t* appendlog_req,
+    uint64 pre_log_index, uint64 last_log_index)
 {
     appendlog_req->head.req_seq = g_timer()->now;
     appendlog_req->head.ack_seq = 0;
@@ -279,7 +314,7 @@ static inline void rep_init_appendlog_req(uint32 stream_id, rep_apendlog_req_t* 
     appendlog_req->pre_log.term = stg_get_term(stream_id, pre_log_index);
     appendlog_req->leader_last_index = last_log_index;
     appendlog_req->cluster_min_apply_id = rep_get_cluster_min_apply_idx(stream_id);
-    appendlog_req->log_count = log_count;
+    appendlog_req->log_count = 0;
 }
 
 static uint64 rep_calu_log_count_by_control(dcf_role_t default_role, uint64 log_count)
@@ -292,7 +327,6 @@ static uint64 rep_calu_log_count_by_control(dcf_role_t default_role, uint64 log_
         return log_count;
     }
     log_count = (uint64)(log_count * ADJUST_STEP);
-    log_count = log_count > REP_MAX_LOG_COUNT ? REP_MAX_LOG_COUNT : log_count;
     LOG_DEBUG_INF("[REP]flow control count: %llu, load level: %d, step: %f, high times: %u", log_count, LOAD_LEVEL,
                   ADJUST_STEP, HIGH_LEVEL_TIMES);
     if (log_count == 0) {
@@ -318,86 +352,71 @@ static uint64 rep_calu_log_count(uint32 stream_id, uint32 node_id, dcf_role_t de
     if (log_begin == CM_INVALID_INDEX_ID) {
         log_count = log_end;
     } else {
-        log_count = log_end - log_begin + 1;
+        log_count = (log_end - log_begin) + 1;
     }
 
-    if (APPEND_MODE == APPEND_NORMAL_MODE) {
-        log_count = MIN(log_count, REP_MAX_LOG_COUNT);
-    } else {
+    if (APPEND_MODE != APPEND_NORMAL_MODE) {
         log_count = MIN(log_count, 1);
     }
 
     return rep_calu_log_count_by_control(default_role, log_count);
 }
 
+#define MEC_AND_REP_HEAD_SIZE (sizeof(mec_message_head_t) + sizeof(rep_apendlog_req_t))
 // Check if value illegal at compile time
-CM_STATIC_ASSERT((MEC_BUFFER_RESV_SIZE - PADDING_BUFFER_SIZE) >= sizeof(rep_apendlog_req_t));
-CM_STATIC_ASSERT((MEC_BUFFER_RESV_SIZE - PADDING_BUFFER_SIZE) < (sizeof(rep_apendlog_req_t) + SIZE_K(1)));
-
-#define FILL_APPEND_LOG_REQ(appendlog_req, index, log_begin, j)                               \
-    do {                                                                                      \
-        (appendlog_req)->logs[(index) - (log_begin)].log_id.term = ENTRY_TERM(entrys[(j)]);   \
-        (appendlog_req)->logs[(index) - (log_begin)].log_id.index = ENTRY_INDEX(entrys[(j)]); \
-        (appendlog_req)->logs[(index) - (log_begin)].buf = ENTRY_BUF(entrys[(j)]);            \
-        (appendlog_req)->logs[(index) - (log_begin)].size = ENTRY_SIZE(entrys[(j)]);          \
-        (appendlog_req)->logs[(index) - (log_begin)].type = ENTRY_TYPE(entrys[(j)]);          \
-        (appendlog_req)->logs[(index) - (log_begin)].key = ENTRY_KEY(entrys[(j)]);            \
-    } while (0)
+CM_STATIC_ASSERT(MEC_BUFFER_RESV_SIZE >= (PADDING_BUFFER_SIZE + MEC_AND_REP_HEAD_SIZE));
+CM_STATIC_ASSERT(MEC_BUFFER_RESV_SIZE < (PADDING_BUFFER_SIZE + MEC_AND_REP_HEAD_SIZE + SIZE_K(1)));
 
 static status_t rep_appendlog_node(uint32 stream_id, uint32 node_id, dcf_role_t default_role, uint64 last_log_index,
     bool8* node_exists_log)
 {
-    LOG_DEBUG_INF("rep_appendlog_node begin");
-    rep_apendlog_req_t* appendlog_req = (rep_apendlog_req_t*)rep_get_appenlog_req_buf(sizeof(rep_apendlog_req_t));
-    CM_CHECK_NULL_PTR(appendlog_req);
-    log_entry_t** entrys = (log_entry_t**)rep_get_entrys_buf(sizeof(log_entry_t*)*REP_MAX_LOG_COUNT);
-    CM_CHECK_NULL_PTR(entrys);
     uint64 old_next_index = (uint64)cm_atomic_get((atomic_t*)&NEXT_INDEX);
     uint64 log_begin = old_next_index == CM_INVALID_INDEX_ID ? 1 : old_next_index;
     log_begin = MAX(log_begin, stg_first_index(stream_id));
     uint64 log_count = rep_calu_log_count(stream_id, node_id, default_role, log_begin, last_log_index);
-    uint64 j = 0;
-    uint32 total_size = 0;
     *node_exists_log = (log_count > 0);
-
-    for (uint64 index = log_begin; j < log_count; index++, j++) {
-        entrys[j] = stg_get_entry(stream_id, index);
-        if (entrys[j] == NULL) {
-            break;
-        }
-        total_size += ENTRY_SIZE(entrys[j]);
-        if (total_size > MESSAGE_BUFFER_SIZE && j > 0) {
-            LOG_DEBUG_INF("total_size[%u] is enough, send size[%u]. log_count[%llu], j[%llu]",
-                total_size, total_size - ENTRY_SIZE(entrys[j]), log_count, j);
-            stg_entry_dec_ref(entrys[j]);
-            break;
-        }
-        ps_record1(PS_PACK, index);
-        FILL_APPEND_LOG_REQ(appendlog_req, index, log_begin, j);
-    }
 
     /* Logs are sent even if log_count==0.
     Periodically sending empty logs ensures that lost packets are retransmitted */
     mec_message_t pack;
-    CM_RETURN_IFERR_EX(mec_alloc_pack(&pack, MEC_CMD_APPEND_LOG_RPC_REQ, g_cur_node_id, node_id, stream_id),
-        rep_release_entrys(entrys, j));
-
+    CM_RETURN_IFERR(mec_alloc_pack(&pack, MEC_CMD_APPEND_LOG_RPC_REQ, g_cur_node_id, node_id, stream_id));
     uint64 pre_log_index = log_begin == CM_INVALID_INDEX_ID ? CM_INVALID_INDEX_ID : log_begin - 1;
-    rep_init_appendlog_req(stream_id, appendlog_req, pre_log_index, last_log_index, j);
+    rep_apendlog_req_t appendlog_req;
+    rep_init_appendlog_head(stream_id, &appendlog_req, pre_log_index, last_log_index);
+    CM_RETURN_IFERR_EX(rep_encode_appendlog_head(&pack, &appendlog_req), mec_release_pack(&pack));
+    uint32 log_count_pos = mec_get_write_pos(&pack) - sizeof(uint64);
 
-    if ((rep_encode_appendlog_req(&pack, appendlog_req) != CM_SUCCESS) || (mec_send_data(&pack) != CM_SUCCESS)) {
-        rep_release_entrys(entrys, j);
-        mec_release_pack(&pack);
-        LOG_DEBUG_ERR("[REP]rep send append log failed: " REP_APPEND_REQ_FMT, REP_APPEND_REQ_VAL(&pack, appendlog_req));
-        return CM_ERROR;
+    uint64 j = 0;
+    uint32 total_size = 0;
+    for (uint64 index = log_begin; j < log_count; index++, j++) {
+        log_entry_t* entry = stg_get_entry(stream_id, index);
+        if (entry == NULL) {
+            break;
+        }
+        total_size += (sizeof(rep_log_t) + ENTRY_SIZE(entry));
+        if (total_size > MESSAGE_BUFFER_SIZE && j > 0) {
+            LOG_DEBUG_INF("[REP]total_size[%u] is enough, send size[%u]. log_count[%llu], j[%llu]",
+                total_size, (uint32)(total_size - (sizeof(rep_log_t) + ENTRY_SIZE(entry))), log_count, j);
+            stg_entry_dec_ref(entry);
+            break;
+        }
+        status_t ret = rep_encode_one_log(&pack, log_count_pos, j + 1, entry);
+        stg_entry_dec_ref(entry);
+        if (ret != CM_SUCCESS) {
+            mec_modify_int64(&pack, log_count_pos, j);
+            LOG_DEBUG_WAR("[REP]encode_one_log fail, index=%llu, j=%llu", index, j);
+            break;
+        }
+        ps_record1(PS_PACK, index);
     }
+    appendlog_req.log_count = j;
 
-    LOG_DEBUG_INF("[REP]rep send append log succeed: " REP_APPEND_REQ_FMT, REP_APPEND_REQ_VAL(&pack, appendlog_req));
+    CM_RETURN_IFERR_EX(mec_send_data(&pack), mec_release_pack(&pack));
+    LOG_DEBUG_INF("[REP]rep send succeed: " REP_APPEND_REQ_FMT, REP_APPEND_REQ_VAL(&pack, &appendlog_req, log_begin));
     if (APPEND_MODE == APPEND_NORMAL_MODE) {
         (void)cm_atomic_cas((atomic_t*)&NEXT_INDEX, old_next_index, log_begin + j);
         LOG_DEBUG_INF("[REP]set next_index to %llu,stream_id=%u,node_id=%u", NEXT_INDEX, stream_id, node_id);
     }
-    rep_release_entrys(entrys, j);
     mec_release_pack(&pack);
     return CM_SUCCESS;
 }
@@ -531,21 +550,20 @@ static void rep_appendlog_thread_entry(thread_t *thread)
 
 void rep_flow_ctrl_sampling_and_calc()
 {
-    uint64 commit_count, commit_total, commit_max;
+    uint64 commit_count, commit_total, commit_max, avg_delay;
     static uint64 total_delay = 0;
-    static uint64 last_total_delay = UINT64_MAX;
+    static uint64 last_avg_delay = UINT64_MAX;
     static uint64 max_delay = 0;
     static uint64 min_delay = UINT64_MAX;
-    int32 delta = 1;
-    static int32 sleep_time = REP_FC_INIT_VAL;
+    int32 delta;
+    static int32 ctrl = REP_FC_INIT_VAL;
     static int32 direction = 1;
     static uint64 count = 0;
     uint64 cur_delay = 0;
 
-    static time_t last = 0;
-    time_t now = time(NULL);
-    if (now - last >= REP_FC_SAMP_PERIOD) {
-        last = now;
+    static timespec_t last = 0;
+    if (cm_clock_now() - last >= REP_FC_SAMP_PERIOD * MICROSECS_PER_SECOND) {
+        last = cm_clock_now();
         // use commit_delay as sampling value now, should classify by g_flow_ctrl_type if needed.
         ps_get_stat(PS_COMMIT, &commit_count, &commit_total, &commit_max);
         if (commit_count != 0) {
@@ -556,29 +574,26 @@ void rep_flow_ctrl_sampling_and_calc()
 
             count++;
             if (count % REP_FC_CTRL_PERIOD == 0) {
-                total_delay -= (max_delay + min_delay);
-                if (sleep_time / CM_10X_FIXED > 1) {
-                    delta = sleep_time / CM_10X_FIXED;
-                }
+                avg_delay = (total_delay - (max_delay + min_delay)) / (REP_FC_CTRL_PERIOD - FC_MIN_MAX);
+                delta = MAX(ctrl / CM_10X_FIXED, 1);
 
-                if (total_delay > last_total_delay) {
+                if (avg_delay > last_avg_delay) {
                     direction = 0 - direction;
-                } else if (total_delay == last_total_delay) {
+                } else if (avg_delay == last_avg_delay) {
                     delta = 0;
                 }
-                last_total_delay = total_delay;
+                last_avg_delay = avg_delay;
 
-                sleep_time += delta * direction;
-                sleep_time = MAX(sleep_time, 0);
-                sleep_time = MIN(sleep_time, REP_FC_MAX_VAL);
-                g_rep_flow_ctrl_val = (uint32)sleep_time;
+                ctrl = (avg_delay < REP_FC_CTRL_THD) ? (ctrl / CM_2X_FIXED) : MAX(ctrl + delta * direction, 1);
+                ctrl = MAX(ctrl, 0);
+                ctrl = MIN(ctrl, REP_FC_MAX_VAL);
+                g_rep_flow_ctrl_val = (uint32)ctrl;
                 total_delay = 0;
                 max_delay = 0;
                 min_delay = UINT64_MAX;
             }
         }
-        LOG_PROFILE("commit_count=%llu, mavg_delay=%llu, flow_ctrl_val=%u",
-            commit_count, cur_delay, g_rep_flow_ctrl_val);
+        LOG_PROFILE("commit_cnt=%llu, cur_lat=%llu, flow_ctrl_val=%u", commit_count, cur_delay, g_rep_flow_ctrl_val);
     }
 }
 
@@ -601,22 +616,40 @@ static void rep_leader_monitor_entry(thread_t *thread)
 
 static int rep_index_compare(const void *a, const void *b)
 {
-    if ((*(uint64*)a == (*(uint64*)b))) {
+    if (((dcf_node_weight_t *)a)->index == ((dcf_node_weight_t *)b)->index) {
         return 0;
-    } else if ((*(uint64*)a > (*(uint64*)b))) {
+    } else if (((dcf_node_weight_t *)a)->index > ((dcf_node_weight_t *)b)->index) {
         return -1;
     } else {
         return 1;
     }
 }
 
+static status_t rep_cal_commit_index(dcf_node_weight_t *sort_index, uint32 voted_cnt, uint32 stream_id, uint32 quorum,
+    uint64 *commit_idx)
+{
+    uint32 all_votes = 0;
+    qsort(sort_index, voted_cnt, sizeof(dcf_node_weight_t), rep_index_compare);
+    for (uint32 i = 0; i < voted_cnt; i++) {
+        all_votes += sort_index[i].weight;
+        if (all_votes >= quorum) {
+            *commit_idx = sort_index[i].index;
+            return CM_SUCCESS;
+        }
+    }
+
+    return CM_ERROR;
+}
+
 static status_t rep_try_commit_log(uint32 stream_id)
 {
-    uint32 node_count, quorum;
+    uint32 node_count, quorum, weight;
     uint32 vote_count = 0;
+    uint32 voted_node = 0;
     bool32 is_elc_voter;
+    uint64 commit_index;
     uint32 nodes[CM_MAX_NODE_COUNT];
-    uint64 sort_index[CM_MAX_NODE_COUNT];
+    dcf_node_weight_t sort_index[CM_MAX_NODE_COUNT];
     uint64 min_apply_id = CM_INVALID_ID64;
 
     CM_RETURN_IFERR(elc_get_quorum(stream_id, &quorum));
@@ -625,27 +658,23 @@ static status_t rep_try_commit_log(uint32 stream_id)
         uint32 node_id = nodes[i];
         CM_RETURN_IFERR(elc_is_voter(stream_id, node_id, &is_elc_voter));
         if (is_elc_voter) {
+            CM_RETURN_IFERR(elc_node_voting_weight(stream_id, node_id, &weight));
             uint64 index = MATCH_INDEX.index;
-            sort_index[vote_count] = index;
-            vote_count++;
-            LOG_DEBUG_INF("[REP]rep_try_commit_log:node_id=%u,match_index=%llu.", node_id, index);
+            sort_index[voted_node].index = index;
+            sort_index[voted_node].weight = weight;
+            vote_count += weight;
+            ++voted_node;
+            LOG_DEBUG_INF("[REP]rep_try_commit_log:node_id=%u,match_index=%llu,weight=%u.", node_id, index, weight);
         }
 
         min_apply_id = MIN(min_apply_id, APPLY_INDEX);
     }
 
-    if (quorum == 0 || quorum > vote_count) {
-        LOG_RUN_ERR("[REP] invalid quorum:%u,vote_count;%u", quorum, vote_count);
-        return CM_ERROR;
-    }
-
     rep_set_cluster_min_apply_idx(stream_id, min_apply_id);
-    qsort(sort_index, vote_count, sizeof(uint64), rep_index_compare);
-
-    uint64 commit_index = sort_index[quorum - 1];
+    CM_RETURN_IFERR(rep_cal_commit_index(sort_index, voted_node, stream_id, quorum, &commit_index));
     uint64 log_term = stg_get_term(stream_id, commit_index);
     uint64 cur_term = elc_get_current_term(stream_id);
-    LOG_DEBUG_INF("[REP]rep_try_commit_log:majority_count=%u,try commit_index=%llu,log_term=%llu,cur_term=%llu.",
+    LOG_DEBUG_INF("[REP]rep_cal_commit_idx:majority_count=%u,try commit_idx=%llu,log_term=%llu,cur_term=%llu.",
         quorum, commit_index, log_term, cur_term);
     if (log_term == cur_term) {
         log_id_t last = rep_get_commit_log(stream_id);
@@ -677,7 +706,7 @@ status_t rep_leader_acceptlog_proc(uint32 stream_id)
     return CM_SUCCESS;
 }
 
-static void rep_rematch_proc(uint32 stream_id, uint32 node_id, rep_apendlog_ack_t* ack)
+static void rep_rematch_proc(uint32 stream_id, uint32 node_id, const rep_apendlog_ack_t* ack)
 {
     APPEND_MODE = APPEND_REMATCH_MODE;
     log_id_t next_log = rep_get_pre_term_log(stream_id, ack->pre_log.index);

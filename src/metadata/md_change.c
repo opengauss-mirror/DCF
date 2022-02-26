@@ -29,34 +29,46 @@
 extern "C" {
 #endif
 
-int md_after_write_cb(uint32 stream_id, uint64 index, const char *buf, uint32 size, uint64 key, int32 error_no)
-{
-    status_t ret = elc_update_node_role(stream_id);
-    if (ret != CM_SUCCESS) {
-        LOG_DEBUG_ERR("[META]after_write:elc_update_node_role failed.");
-    }
-    ret = mec_update_profile_inst();
-    if (ret != CM_SUCCESS) {
-        LOG_DEBUG_ERR("[META]after_write:mec_update_profile_inst failed.");
-    }
-    CM_RETURN_IFERR(md_set_status(META_NORMAL));
-    return ret;
-}
-
 int md_consensus_notify_cb(uint32 stream_id, uint64 index, const char *buf, uint32 size, uint64 key)
 {
-    status_t ret = elc_update_node_role(stream_id);
-    if (ret != CM_SUCCESS) {
-        LOG_DEBUG_ERR("[META]consensus_notify:elc_update_node_role failed.");
+    status_t ret = CM_SUCCESS;
+
+    if (NEED_ADD(key) || NEED_REMOVE(key)) {
+        ret = mec_update_profile_inst();
+        if (ret != CM_SUCCESS) {
+            LOG_DEBUG_ERR("[META]consensus_notify:mec_update_profile_inst failed.");
+        }
     }
-    ret = mec_update_profile_inst();
-    if (ret != CM_SUCCESS) {
-        LOG_DEBUG_ERR("[META]consensus_notify:mec_update_profile_inst failed.");
+
+    if (NEED_CHANGE_ROLE(key)) {
+        ret = elc_update_node_role(stream_id);
+        if (ret != CM_SUCCESS) {
+            LOG_DEBUG_ERR("[META]consensus_notify:elc_update_node_role failed.");
+        }
     }
+
+    if (NEED_CHANGE_GROUP(key)) {
+        ret = elc_update_node_group(stream_id);
+        if (ret != CM_SUCCESS) {
+            LOG_DEBUG_ERR("[META]consensus_notify:elc_update_node_group failed.");
+        }
+    }
+
+    if (NEED_CHANGE_PRIORITY(key)) {
+        ret = elc_update_node_priority(stream_id);
+        if (ret != CM_SUCCESS) {
+            LOG_DEBUG_ERR("[META]consensus_notify:elc_update_node_priority failed.");
+        }
+    }
+
     CM_RETURN_IFERR(md_set_status(META_NORMAL));
     return ret;
 }
 
+int md_after_write_cb(uint32 stream_id, uint64 index, const char *buf, uint32 size, uint64 key, int32 error_no)
+{
+    return md_consensus_notify_cb(stream_id, index, buf, size, key);
+}
 
 #ifdef __cplusplus
 }

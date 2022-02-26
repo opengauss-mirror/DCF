@@ -170,6 +170,7 @@ status_t load_stream(stream_t *stream)
         return CM_ERROR;
     }
     stream->first_index = stream->log_storage.first_index;
+    stream->last_term  = stream->log_storage.last_term;
     stream->last_index  = stream->log_storage.last_index;
     stream->entry_cache.begin_index = stream->last_index + 1;
     return CM_SUCCESS;
@@ -534,7 +535,7 @@ static inline bool32 if_exceed_cache_threshold(stream_t *stream)
     if (SECUREC_UNLIKELY(cache->begin_index > stream->last_index)) {
         return CM_FALSE;
     }
-    return ((stream->last_index - cache->begin_index + 1) >= ENTRY_CACHE_THRESHOLD);
+    return (((stream->last_index - cache->begin_index) + 1) >= ENTRY_CACHE_THRESHOLD);
 }
 
 static inline bool32 if_exceed_mem_threshold(mem_pool_t *mem_pool)

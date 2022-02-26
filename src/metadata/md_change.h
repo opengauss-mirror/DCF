@@ -35,8 +35,10 @@ extern "C" {
 int md_after_write_cb(uint32 stream_id, uint64 index, const char *buf, uint32 size, uint64 key, int32 error_no);
 int md_consensus_notify_cb(uint32 stream_id, uint64 index, const char *buf, uint32 size, uint64 key);
 
-extern status_t elc_update_node_role(uint32 stream_id);
-extern status_t mec_update_profile_inst();
+status_t mec_update_profile_inst();
+status_t elc_update_node_role(uint32 stream_id);
+status_t elc_update_node_group(uint32 stream_id);
+status_t elc_update_node_priority(uint32 stream_id);
 #ifdef __cplusplus
 }
 #endif

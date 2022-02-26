@@ -79,32 +79,52 @@ status_t rep_follower_init()
     return CM_SUCCESS;
 }
 
-static status_t rep_follower_appendlog(uint32 stream_id, rep_apendlog_req_t* appendlog_req, errno_t* error_no)
+static status_t rep_follower_appendlog(uint32 stream_id, const rep_apendlog_req_t* appendlog_req, mec_message_t *pack,
+    rep_log_t* log0, errno_t* error_no)
 {
-    for (uint64 i = 0; i < appendlog_req->log_count; i++) {
-        ps_start(appendlog_req->logs[i].log_id.index, g_timer()->now);
-        if (stg_append_entry(stream_id, appendlog_req->logs[i].log_id.term,
-            appendlog_req->logs[i].log_id.index, appendlog_req->logs[i].buf, appendlog_req->logs[i].size,
-            appendlog_req->logs[i].key, appendlog_req->logs[i].type, NULL) != CM_SUCCESS) {
-            LOG_DEBUG_ERR("[REP]stg_append_entry failed");
+    if (appendlog_req->log_count == 0) {
+        return CM_SUCCESS;
+    }
+
+    ps_start(log0->log_id.index, g_timer()->now);
+    if (stg_append_entry(stream_id, log0->log_id.term, log0->log_id.index, log0->buf, log0->size,
+        log0->key, log0->type, NULL) != CM_SUCCESS) {
+        LOG_DEBUG_ERR("[REP]stg_append_entry failed, log0 index=%llu", log0->log_id.index);
+        *error_no = ERR_APPEND_ENTRY_FAILED;
+        return CM_ERROR;
+    }
+    LAST_APPEND_IDX = log0->log_id;
+
+    for (uint64 i = 1; i < appendlog_req->log_count; i++) {
+        rep_log_t log;
+        if (rep_decode_one_log(pack, &log) != CM_SUCCESS) {
+            LOG_DEBUG_ERR("[REP]rep_decode_one_log failed");
             *error_no = ERR_APPEND_ENTRY_FAILED;
             return CM_ERROR;
         }
 
-        LAST_APPEND_IDX = appendlog_req->logs[i].log_id;
+        ps_start(log.log_id.index, g_timer()->now);
+        if (stg_append_entry(stream_id, log.log_id.term, log.log_id.index, log.buf, log.size,
+            log.key, log.type, NULL) != CM_SUCCESS) {
+            LOG_DEBUG_ERR("[REP]stg_append_entry failed, log index=%llu", log.log_id.index);
+            *error_no = ERR_APPEND_ENTRY_FAILED;
+            return CM_ERROR;
+        }
+        LAST_APPEND_IDX = log.log_id;
     }
 
     return CM_SUCCESS;
 }
 
-static status_t rep_check_exception(uint32 stream_id, rep_apendlog_req_t* appendlog_req, errno_t* error_no)
+static status_t rep_check_exception(uint32 stream_id, const rep_apendlog_req_t* appendlog_req, const errno_t* error_no)
 {
     if (*error_no != ERR_TERM_IS_NOT_MATCH) {
         return CM_SUCCESS;
     }
 
     uint64 last_index = stg_last_index(stream_id);
-    if (last_index < appendlog_req->leader_first_log.index) {
+    uint64 applied_idx = stg_get_applied_index(stream_id);
+    if (applied_idx + 1 < appendlog_req->leader_first_log.index && last_index < appendlog_req->leader_first_log.index) {
         LOG_DEBUG_ERR("[REP]first index term not match. last index %llu, leader first log index %llu",
             stg_last_index(stream_id), appendlog_req->leader_first_log.index);
         dcf_set_exception(stream_id, DCF_EXCEPTION_MISSING_LOG);
@@ -122,7 +142,8 @@ static status_t rep_check_exception(uint32 stream_id, rep_apendlog_req_t* append
     return CM_ERROR;
 }
 
-static status_t rep_follower_check_log_count(uint32 stream_id, rep_apendlog_req_t* appendlog_req, errno_t* error_no)
+static status_t rep_follower_check_log_count(uint32 stream_id, const rep_apendlog_req_t* appendlog_req,
+    errno_t* error_no)
 {
     if (appendlog_req->log_count == 0) {
         // the pre log is matched
@@ -142,7 +163,8 @@ static status_t rep_follower_check_log_count(uint32 stream_id, rep_apendlog_req_
     return CM_SUCCESS;
 }
 
-static void rep_follower_check_log_match(uint32 stream_id, rep_apendlog_req_t* appendlog_req, errno_t* error_no)
+static void rep_follower_check_log_match(uint32 stream_id, const rep_apendlog_req_t* appendlog_req,
+    const rep_log_t* log0, errno_t* error_no)
 {
     if (appendlog_req->pre_log.index == CM_INVALID_INDEX_ID) {
         return;
@@ -151,7 +173,7 @@ static void rep_follower_check_log_match(uint32 stream_id, rep_apendlog_req_t* a
         return;
     }
     uint64 last_index = stg_last_index(stream_id);
-    if (last_index < appendlog_req->leader_first_log.index) {
+    if (last_index != CM_INVALID_INDEX_ID && last_index < appendlog_req->leader_first_log.index) {
         LOG_DEBUG_ERR("[REP]log is not continue, last log's idx = %llu, first idx %llu",
             last_index, appendlog_req->leader_first_log.index);
         *error_no = ERR_TERM_IS_NOT_MATCH;
@@ -170,17 +192,18 @@ static void rep_follower_check_log_match(uint32 stream_id, rep_apendlog_req_t* a
     } else {
         if (appendlog_req->log_count != 0) {
             uint64 cur_log_term = stg_get_term(stream_id, appendlog_req->pre_log.index + 1);
-            if (cur_log_term != appendlog_req->logs[0].log_id.term) {
+            if (cur_log_term != log0->log_id.term) {
                 LOG_DEBUG_ERR("[REP]pre log term is not match. leader's pre log is invalid. match.index = %llu,"
                     " term[%llu != %llu]",
-                    appendlog_req->logs[0].log_id.index, appendlog_req->logs[0].log_id.term, cur_log_term);
+                    log0->log_id.index, log0->log_id.term, cur_log_term);
                 *error_no = ERR_TERM_IS_NOT_MATCH;
             }
         }
     }
 }
 
-static status_t rep_follower_process(uint32 stream_id, rep_apendlog_req_t* appendlog_req, errno_t* error_no)
+static status_t rep_follower_process(uint32 stream_id, rep_apendlog_req_t* appendlog_req, mec_message_t *pack,
+    rep_log_t* log0, errno_t* error_no)
 {
     uint64 cur_term = elc_get_current_term(stream_id);
     *error_no = 0;
@@ -217,18 +240,18 @@ static status_t rep_follower_process(uint32 stream_id, rep_apendlog_req_t* appen
     rep_set_accept_flag(stream_id);
     rep_set_cluster_min_apply_idx(stream_id, appendlog_req->cluster_min_apply_id);
 
-    rep_follower_check_log_match(stream_id, appendlog_req, error_no);
+    rep_follower_check_log_match(stream_id, appendlog_req, log0, error_no);
 
     CM_RETURN_IFERR(rep_check_exception(stream_id, appendlog_req, error_no));
 
     CM_RETURN_IFERR(rep_follower_check_log_count(stream_id, appendlog_req, error_no));
 
-    CM_RETURN_IFERR(rep_follower_appendlog(stream_id, appendlog_req, error_no));
+    CM_RETURN_IFERR(rep_follower_appendlog(stream_id, appendlog_req, pack, log0, error_no));
 
     return CM_SUCCESS;
 }
 
-static status_t rep_follower_send_ack1(uint32 stream_id, uint32 leader, rep_apendlog_req_t* appendlog_req,
+static status_t rep_follower_send_ack1(uint32 stream_id, uint32 leader, const rep_apendlog_req_t* appendlog_req,
     errno_t error_no)
 {
     rep_apendlog_ack_t appendlog_ack;
@@ -285,35 +308,40 @@ static status_t rep_follower_send_ack1(uint32 stream_id, uint32 leader, rep_apen
 // follower process append log message
 static status_t rep_appendlog_req_proc(mec_message_t *pack)
 {
-    rep_apendlog_req_t* appendlog_req = (rep_apendlog_req_t*)rep_get_appenlog_req_buf(sizeof(rep_apendlog_req_t));
-    CM_CHECK_NULL_PTR(appendlog_req);
+    rep_apendlog_req_t appendlog_req;
     uint32 stream_id = pack->head->stream_id;
     errno_t error_no;
 
-    if (rep_decode_appendlog_req(pack, appendlog_req) != CM_SUCCESS) {
+    if (rep_decode_appendlog_head(pack, &appendlog_req) != CM_SUCCESS) {
         LOG_DEBUG_ERR("[REP]rep_decode_appendlog_req failed.");
         return CM_ERROR;
     }
 
-    if (appendlog_req->log_count > 0 &&
-        appendlog_req->head.trace_key >= appendlog_req->logs[0].log_id.index &&
-        appendlog_req->head.trace_key < appendlog_req->logs[0].log_id.index + appendlog_req->log_count) {
-        rep_save_tracekey(appendlog_req->head.trace_key);
-        set_trace_key(appendlog_req->head.trace_key);
+    rep_log_t log0;
+    if (appendlog_req.log_count > 0) {
+        if (rep_decode_one_log(pack, &log0) != CM_SUCCESS) {
+            LOG_DEBUG_ERR("[REP]rep_decode_log0 failed, log_count=%llu", appendlog_req.log_count);
+            return CM_ERROR;
+        }
+        if (appendlog_req.head.trace_key >= log0.log_id.index &&
+            appendlog_req.head.trace_key < log0.log_id.index + appendlog_req.log_count) {
+            rep_save_tracekey(appendlog_req.head.trace_key);
+            set_trace_key(appendlog_req.head.trace_key);
+        }
     }
 
     LOG_DEBUG_INF("[REP]recv append_req:" REP_APPEND_REQ_FMT,
-        REP_APPEND_REQ_VAL(pack, appendlog_req));
+        REP_APPEND_REQ_VAL(pack, &appendlog_req, log0.log_id.index));
 
-    status_t ret = rep_follower_process(stream_id, appendlog_req, &error_no);
+    status_t ret = rep_follower_process(stream_id, &appendlog_req, pack, &log0, &error_no);
     if (ret != CM_SUCCESS) {
-        return rep_follower_send_ack1(stream_id, pack->head->src_inst, appendlog_req, error_no);
+        return rep_follower_send_ack1(stream_id, pack->head->src_inst, &appendlog_req, error_no);
     }
 
     return CM_SUCCESS;
 }
 
-status_t rep_follower_send_ack(uint32 stream_id, uint32 leader, log_id_t* last_accept_log)
+status_t rep_follower_send_ack(uint32 stream_id, uint32 leader, const log_id_t* last_accept_log)
 {
     mec_message_t pack;
     rep_apendlog_ack_t appendlog_ack;

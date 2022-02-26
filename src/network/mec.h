@@ -45,7 +45,7 @@ typedef struct st_mec_message_head {
     uint32     size;
     uint32     serial_no;
     uint32     frag_no;
-    uint32     reserved;
+    uint32     version;
     uint64     time1;
     uint64     time2;
     uint64     time3;
@@ -70,13 +70,17 @@ typedef enum en_mec_command {
     MEC_CMD_APPEND_LOG_RPC_ACK     = 4,
     MEC_CMD_VOTE_REQUEST_RPC_REQ   = 5,
     MEC_CMD_VOTE_REQUEST_RPC_ACK   = 6,
-    MEC_CMD_HB_REQUEST_RPC_REQ     = 7,
-    MEC_CMD_HB_REQUEST_RPC_ACK     = 8,
+    MEC_CMD_GET_COMMIT_INDEX_REQ   = 7,
+    MEC_CMD_GET_COMMIT_INDEX_ACK   = 8,
     MEC_CMD_PROMOTE_LEADER_RPC_REQ = 9,
     MEC_CMD_BLOCK_NODE_RPC_REQ     = 10,
     MEC_CMD_BLOCK_NODE_RPC_ACK     = 11,
     MEC_CMD_SEND_COMMON_MSG        = 12,
-    MEC_CMD_CHANGE_ROLE_RPC_REQ    = 13,
+    MEC_CMD_CHANGE_MEMBER_RPC_REQ  = 13,
+    MEC_CMD_UNIVERSAL_WRITE_REQ    = 14,
+    MEC_CMD_UNIVERSAL_WRITE_ACK    = 15,
+    MEC_CMD_STATUS_CHECK_RPC_REQ   = 16,
+    MEC_CMD_STATUS_CHECK_RPC_ACK   = 17,
 
     MEC_CMD_NORMAL_CEIL, // please add normal cmd before this
 
@@ -117,7 +121,7 @@ void unregister_msg_process(mec_command_t cmd);
 #define MEC_SET_BRD_INST(bits, id) CM_BIT_SET((bits)[(id) / INST_STEP], CM_GET_MASK((id) % INST_STEP))
 #define MEC_RESET_BRD_INST(bits, id) CM_BIT_RESET((bits)[(id) / INST_STEP], CM_GET_MASK((id) % INST_STEP))
 #define MEC_IS_INST_SEND(bits, id) CM_BIT_TEST((bits)[(id) / INST_STEP], CM_GET_MASK((id) % INST_STEP))
-#define MEC_INST_SENT_SUCCESS(bits, id) (bits)[(id) / INST_STEP] |= ((uint64)0x1 << ((id) % INST_STEP))
+#define MEC_INST_SENT_SUCCESS(bits, id) ((bits)[(id) / INST_STEP] |= ((uint64)0x1 << ((id) % INST_STEP)))
 
 /* in broadcast scenary, dst_inst must be CM_INVALID_NODE_ID */
 status_t mec_alloc_pack(mec_message_t *pack, mec_command_t cmd, uint32 src_inst, uint32 dst_inst, uint32 stream_id);
@@ -142,6 +146,7 @@ status_t mec_register_decrypt_pwd(usr_cb_decrypt_pwd_t cb_func);
 
 /* need keep 4-byte align by the caller */
 status_t mec_get_int16(mec_message_t *pack, int16 *value);
+
 status_t mec_get_double(mec_message_t *pack, double *value);
 status_t mec_get_bin(mec_message_t *pack, uint32 *size, void **buffer);
 uint32 mec_get_send_que_count(msg_priv_t priv);
@@ -150,6 +155,14 @@ int64 mec_get_send_mem_capacity(msg_priv_t priv);
 int64 mec_get_recv_mem_capacity(msg_priv_t priv);
 bool32 mec_check_all_connect();
 bool32 mec_is_ready(uint32 stream_id, uint32 dst_inst, msg_priv_t priv);
+status_t mec_get_peer_version(uint32 stream_id, uint32 dst_inst, uint32 *peer_version);
+static inline uint32 mec_get_recv_pack_version(const mec_message_t *pack)
+{
+    return pack->head->version;
+}
+
+uint32 mec_get_write_pos(const mec_message_t *pack);
+void mec_modify_int64(mec_message_t *pack, uint32 pos, uint64 value);
 
 #ifdef __cplusplus
 }

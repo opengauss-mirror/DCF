@@ -169,9 +169,9 @@ typedef struct st_mec_perf_stat_t {
 void mec_get_perf_stat(mec_perf_stat_t* perf_stat);
 void sync_tasks_closed(mq_context_t *mq_ctx);
 status_t dtc_compress(compress_t *compress_ctx, mec_message_head_t *head);
-status_t dtc_init_compress(mec_profile_t *profile, compress_t *compress, bool32 is_compress);
+status_t dtc_init_compress(const mec_profile_t *profile, compress_t *compress, bool32 is_compress);
 
-uint32 mec_get_que_count(mq_context_t *mq_ctx, msg_priv_t priv);
+uint32 mec_get_que_count(const mq_context_t *mq_ctx, msg_priv_t priv);
 int64 mec_get_mem_capacity(mq_context_t *mq_ctx, msg_priv_t priv);
 status_t mec_alloc_msg_item_from_private_pool(message_pool_t **private_pool, msg_item_t **item, uint32 buf_size,
     uint32 private_msg_pool_extent, spinlock_t *private_initlock);

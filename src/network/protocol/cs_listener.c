@@ -59,7 +59,7 @@ static status_t cs_check_link_ip(tcp_link_t *link)
             return CM_SUCCESS;
         }
     }
-    LOG_RUN_ERR("[MEC]Failed to tcp link for ip: %s", temp_ip);
+    LOG_RUN_ERR("[MEC]connection for ip: %s is refused, not in whitelist.", temp_ip);
     return CM_ERROR;
 }
 

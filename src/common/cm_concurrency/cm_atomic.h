@@ -41,7 +41,7 @@ static inline atomic_t cm_atomic_add(atomic_t *val, int64 count)
     return InterlockedAdd64(val, count);
 }
 
-static inline atomic_t cm_atomic_get(atomic_t *val)
+static inline atomic_t cm_atomic_get(const atomic_t *val)
 {
     return InterlockedAdd64(val, 0);
 }

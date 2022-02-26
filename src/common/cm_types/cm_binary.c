@@ -180,7 +180,7 @@ status_t cm_bin2text(const binary_t *bin, bool32 hex_prefix, text_t *text)
     return CM_SUCCESS;
 }
 
-status_t cm_bin2str(binary_t *bin, bool32 hex_prefix, char *str, uint32 buf_len)
+status_t cm_bin2str(const binary_t *bin, bool32 hex_prefix, char *str, uint32 buf_len)
 {
     text_t tmp_text = {
         .str = str,

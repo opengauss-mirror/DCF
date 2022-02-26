@@ -90,16 +90,16 @@ void cs_set_buffer_size(socket_t sock, uint32 send_size, uint32 recv_size);
 void cs_set_keep_alive(socket_t sock, uint32 idle, uint32 interval, uint32 count);
 void cs_set_linger(socket_t sock, int32 l_onoff, int32 l_linger);
 
-int32 cs_tcp_poll_check(tcp_link_t *link, uint32 wait_for, time_t end_time);
+int32 cs_tcp_poll_check(const tcp_link_t *link, uint32 wait_for, time_t end_time);
 status_t cs_create_socket(int ai_family, socket_t *sock);
 status_t cs_tcp_connect(const char *host, uint16 port, tcp_link_t *link,
     const char *bind_host, socket_attr_t *sock_attr);
 bool32 cs_tcp_try_connect(const char *host, uint16 port);
 void cs_tcp_disconnect(tcp_link_t *link);
 void cs_shutdown_socket(socket_t sock);
-status_t cs_tcp_send(tcp_link_t *link, const char *buf, uint32 size, int32 *send_size);
+status_t cs_tcp_send(const tcp_link_t *link, const char *buf, uint32 size, int32 *send_size);
 status_t cs_tcp_send_timed(tcp_link_t *link, const char *buf, uint32 size, uint32 timeout);
-status_t cs_tcp_recv(tcp_link_t *link, char *buf, uint32 size, int32 *recv_size, uint32 *wait_event);
+status_t cs_tcp_recv(const tcp_link_t *link, char *buf, uint32 size, int32 *recv_size, uint32 *wait_event);
 status_t cs_tcp_recv_timed(tcp_link_t *link, char *buf, uint32 size, uint32 timeout);
 status_t cs_tcp_wait(tcp_link_t *link, uint32 wait_for, int32 timeout, bool32 *ready);
 status_t cs_tcp_init();

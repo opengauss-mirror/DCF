@@ -46,12 +46,13 @@ status_t md_get_stream_nodes(uint32 stream_id, uint32 list[CM_MAX_NODE_COUNT], u
 status_t md_get_stream_nodes_count(uint32 stream_id, uint32* count);
 status_t md_get_stream_node_roles(uint32 stream_id, dcf_node_role_t list[CM_MAX_NODE_COUNT], uint32* count);
 status_t md_get_stream_node_ext(uint32 stream_id, uint32 node_id, dcf_node_t* node_info);
+status_t md_get_stream_node_weight(uint32 stream_id, uint32 node_id, uint32* weight);
 status_t md_check_stream_node_exist(uint32 stream_id, uint32 node_id);
 status_t md_get_streams_by_node(uint32 node_id, uint32 list[CM_MAX_STREAM_COUNT], uint32* count);
 
 status_t md_add_stream_member(uint32 stream_id, dcf_node_t* node_info);
 status_t md_remove_stream_member(uint32 stream_id, uint32 node_id);
-status_t md_change_stream_member_role(uint32 stream_id, uint32 node_id, unsigned int role);
+status_t md_change_stream_member(uint32 stream_id, uint32 node_id, dcf_change_member_t *change_info);
 
 const char* md_get_rolename_by_type(dcf_role_t type);
 const dcf_role_t md_get_roletype_by_name(const char *name);
@@ -73,6 +74,8 @@ uint32 md_get_checksum();
 status_t md_set_checksum(uint32 checksum);
 
 char* md_get_buffer();
+status_t parse_change_member_str(const char *change_str, uint32 *stream_id, uint32 *node_id,
+    dcf_change_member_t *change_info);
 
 #ifdef __cplusplus
 }

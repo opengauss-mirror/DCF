@@ -25,7 +25,7 @@ function print_help()
     -h|--help              show help information.
     -3rd|--binarylib_dir   the directory of third party binarylibs.
     -m|--version_mode      this values of paramenter is Debug, Release, the default value is Release.
-    -d|--test              this values of paramenter is ON, OFF, the default value is OFF.
+    -t|--build_tool          this values of parameter is cmake, make, the default value is cmake.
 "
 }
 
@@ -51,12 +51,12 @@ while [ $# -gt 0 ]; do
           version_mode=$2
           shift 2
           ;;
-        -d|--test)
+        -t|--build_tool)
           if [ "$2"X = X ]; then
-              echo "no given version number values"
+              echo "no given build_tool values"
               exit 1
           fi
-          test=$2
+          build_tool=$2
           shift 2
           ;;
          *)
@@ -67,8 +67,23 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-if [ "$version_mode"x == ""x ]; then
+if [ -z "${version_mode}" ] || [ "$version_mode"x == ""x ]; then
     version_mode=Release
+fi
+if [ -z "${binarylib_dir}" ]; then
+    echo "ERROR: 3rd bin dir not set"
+    exit 1
+fi
+if [ -z "${build_tool}" ] || [ "$build_tool"x == ""x ]; then
+    build_tool=cmake
+fi
+if [ ! "$version_mode"x == "Debug"x ] && [ ! "$version_mode"x == "Release"x ]; then
+    echo "ERROR: version_mode param is error"
+    exit 1
+fi
+if [ ! "$build_tool"x == "make"x ] && [ ! "$build_tool"x == "cmake"x ]; then
+    echo "ERROR: build_tool param is error"
+    exit 1
 fi
 
 declare export_api=OFF
@@ -89,7 +104,11 @@ LOCAL_PATH=${0}
 CUR_PATH=$(pwd)
 
 LOCAL_DIR=$(dirname "${LOCAL_PATH}")
-PLAT_FORM_STR=$(sh get_platform_str.sh)
+if [ -z "${PLAT_FORM_STR}" ];then
+    echo "ERROR: env var {PLAT_FORM_STR} not set"
+    exit 1
+fi
+echo "{PLAT_FORM_STR} is: ${PLAT_FORM_STR}"
 export PACKAGE=$LOCAL_DIR/../../../
 export OUT_PACKAGE=dcf
 
@@ -105,7 +124,7 @@ mkdir -p $DCF_LIBRARYS/cJSON
 export LIB_PATH=$binarylib_dir/dependency/$PLAT_FORM_STR
 export P_LIB_PATH=$binarylib_dir/platform/$PLAT_FORM_STR
 
-cp -r $P_LIB_PATH/Huawei_Secure_C/Dynamic_Lib     $DCF_LIBRARYS/huawei_security/lib
+cp -r $P_LIB_PATH/Huawei_Secure_C/comm/lib     $DCF_LIBRARYS/huawei_security/lib
 cp -r $LIB_PATH/openssl/comm/lib                  $DCF_LIBRARYS/openssl/lib
 cp -r $LIB_PATH/zstd/lib                          $DCF_LIBRARYS/zstd/lib
 cp -r $LIB_PATH/lz4/comm/lib                      $DCF_LIBRARYS/lz4/lib
@@ -118,8 +137,14 @@ cp -r $LIB_PATH/lz4/comm/include                  $DCF_LIBRARYS/lz4/include
 cp -r $LIB_PATH/cjson/comm/include/cjson          $DCF_LIBRARYS/cJSON/include
 
 cd $PACKAGE
-cmake -DCMAKE_BUILD_TYPE=${version_mode} -DUSE32BIT=OFF -DTEST=${test} -DENABLE_EXPORT_API=${export_api} CMakeLists.txt
-make all -sj
+if [ "$build_tool"x == "cmake"x ];then
+    cmake -DCMAKE_BUILD_TYPE=${version_mode} -DUSE32BIT=OFF -DTEST=${test} \
+    -DENABLE_EXPORT_API=${export_api} CMakeLists.txt
+    make all -sj 8
+else
+    make clean
+    make BUILD_TYPE=${version_mode} -sj 8
+fi
 
 mkdir -p $binarylib_dir/component/${PLAT_FORM_STR}/${OUT_PACKAGE}/include
 mkdir -p $binarylib_dir/component/${PLAT_FORM_STR}/${OUT_PACKAGE}/lib

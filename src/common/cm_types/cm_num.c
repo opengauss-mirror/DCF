@@ -385,7 +385,7 @@ static inline int32 cm_calc_significand_expn(int32 dot_offset, int32 prec_offset
 * of exponent. When unexpected character occur or the exponent overflow,
 * an error will be returned.
 */
-static inline num_errno_t cm_parse_num_expn(text_t *expn_text, int32 *expn)
+static inline num_errno_t cm_parse_num_expn(const text_t *expn_text, int32 *expn)
 {
     char c;
     int32 tmp_exp;

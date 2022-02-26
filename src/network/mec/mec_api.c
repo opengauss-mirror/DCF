@@ -216,6 +216,7 @@ status_t mec_alloc_pack(mec_message_t *pack, mec_command_t cmd, uint32 src_inst,
     head->serial_no = 0;
     head->batch_size = 1;
     head->frag_no = 0;
+    head->version = CS_LOCAL_VERSION;
     if (get_mec_profile()->algorithm != COMPRESS_NONE && priv) {
         head->flags |= CS_FLAG_COMPRESS;
     }
@@ -500,11 +501,20 @@ status_t mec_get_double(mec_message_t *pack, double *value)
     return CM_SUCCESS;
 }
 
-
 status_t mec_get_bin(mec_message_t *pack, uint32 *size, void **buffer)
 {
     CM_RETURN_IFERR(mec_get_int32(pack, (int32 *)size));
     return mec_get_data(pack, *size, buffer);
+}
+
+uint32 mec_get_write_pos(const mec_message_t *pack)
+{
+    return pack->head->size;
+}
+
+void mec_modify_int64(mec_message_t *pack, uint32 pos, uint64 value)
+{
+    *(uint64 *)(GET_MSG_BUFF(pack) + pos) = CS_DIFFERENT_ENDIAN(pack->options) ? cs_reverse_int64(value) : value;
 }
 
 bool32 mec_check_one_connect(uint32 inst_id)
@@ -624,6 +634,19 @@ bool32 mec_is_ready(uint32 stream_id, uint32 dst_inst, msg_priv_t priv)
     return channel->pipe[priv].send_pipe_active;
 }
 
+status_t mec_get_peer_version(uint32 stream_id, uint32 dst_inst, uint32 *peer_version)
+{
+    mec_context_t *mec_ctx = get_mec_ctx();
+    mec_profile_t *profile = get_mec_profile();
+    uint32 channel_id = MEC_STREAM_TO_CHANNEL_ID(stream_id, profile->channel_num);
+    mec_channel_t *channel = &mec_ctx->channels[dst_inst][channel_id];
+    if (channel == NULL) {
+        LOG_DEBUG_ERR("[MEC]null channel or peer_version, stream_id %u, dst_inst %u", stream_id, dst_inst);
+        return CM_ERROR;
+    }
+    *peer_version = channel->pipe[PRIV_HIGH].send_pipe.version;
+    return CM_SUCCESS;
+}
 
 #ifdef __cplusplus
 }

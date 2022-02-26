@@ -42,13 +42,15 @@ status_t get_node(dcf_node_t** node_list, uint32 node_id, dcf_node_t* node_item)
 // add stream define
 status_t add_stream_member(dcf_streams_t* stream_list, uint32 stream_id, dcf_node_t* node_info);
 status_t remove_stream_member(dcf_streams_t* stream_list, uint32 stream_id, uint32 node_id);
-status_t change_member_role(dcf_streams_t* stream_list, uint32 stream_id, uint32 node_id, dcf_role_t role);
+status_t change_stream_member(dcf_streams_t* stream_list, uint32 stream_id, uint32 node_id,
+    dcf_change_member_t *change_info);
 
 status_t get_stream_list(dcf_streams_t* stream_list, uint32 list[CM_MAX_STREAM_COUNT], uint32* count);
 status_t get_stream_nodes(dcf_streams_t* stream_list, uint32 stream_id, uint32 list[CM_MAX_NODE_COUNT], uint32* count);
 status_t get_stream_nodes_count(dcf_streams_t* stream_list, uint32 stream_id, uint32* count);
 status_t get_stream_node_roles(dcf_streams_t* stream_list, uint32 stream_id, dcf_node_role_t list[CM_MAX_NODE_COUNT],
     uint32* count);
+status_t get_stream_node_weight(dcf_streams_t* stream_list, uint32 stream_id, uint32 node_id, uint32* weight);
 status_t get_stream_node_ext(dcf_streams_t* stream_list, uint32 stream_id, uint32 node_id, dcf_node_t* node_info);
 status_t check_stream_node_exist(dcf_streams_t* stream_list, uint32 stream_id, uint32 node_id);
 status_t get_streams_by_node(dcf_streams_t* stream_list, uint32 node_id, uint32 list[CM_MAX_STREAM_COUNT],

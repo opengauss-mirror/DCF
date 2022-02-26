@@ -299,7 +299,7 @@ void cm_str_reverse(char *dst, const char *src, uint32 dst_len)
     }
 
     for (i = 0; i < len; i++) {
-        dst[i] = src[len - 1 - i];
+        dst[i] = src[(len - 1) - i];
     }
     dst[len] = '\0';
 }
@@ -325,7 +325,6 @@ void cm_text_lower(text_t *text)
 /**
  * Truncate a text from tailing to the maximal. If the text is too long
  * '...' is appended.
- * @author Added by pufuan 00421579, 2017/12/21
  */
 void cm_truncate_text(text_t *text, uint32 max_len)
 {

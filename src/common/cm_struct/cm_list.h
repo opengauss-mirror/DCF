@@ -94,7 +94,7 @@ static inline status_t cm_ptlist_extend(ptlist_t *list, uint32 extent_size)
         LOG_DEBUG_ERR("cm_ptlist_add extending list failed");
         return CM_ERROR;
     }
-    errcode = memset_sp(new_items, (size_t)buf_size, 0, (size_t)buf_size);
+    errcode = memset_sp(new_items, buf_size, 0, buf_size);
     if (errcode != EOK) {
         CM_FREE_PTR(new_items);
         LOG_DEBUG_ERR("cm_ptlist_add extending list failed");
@@ -102,8 +102,8 @@ static inline status_t cm_ptlist_extend(ptlist_t *list, uint32 extent_size)
     }
     if (list->items != NULL) {
         if (list->capacity != 0) {
-            errcode = memcpy_sp(new_items, (size_t)buf_size, list->items,
-                (size_t)(list->capacity * sizeof(pointer_t)));
+            errcode = memcpy_sp(new_items, buf_size, list->items,
+                (uint32)(list->capacity * sizeof(pointer_t)));
             if (errcode != EOK) {
                 CM_FREE_PTR(new_items);
                 LOG_DEBUG_ERR("cm_ptlist_add extending list failed");
@@ -132,7 +132,7 @@ static inline status_t cm_ptlist_add(ptlist_t *list, pointer_t item)
 static inline status_t cm_ptlist_insert(ptlist_t *list, uint32 index, pointer_t item)
 {
     if (index >= list->capacity) { /* extend the list */
-        cm_ptlist_extend(list, index - list->capacity + LIST_EXTENT_SIZE);
+        cm_ptlist_extend(list, (index - list->capacity) + LIST_EXTENT_SIZE);
     }
 
     list->count++;

@@ -108,24 +108,24 @@ static status_t cs_open_tcp_link(const char *host, uint16 port, cs_pipe_t *pipe,
     LOG_RUN_INF("[MEC]after cs_tcp_connect to host %s port %u.", host, port);
     do {
         if (cs_tcp_send_timed(link, (char *)&proto_code, sizeof(proto_code), CM_NETWORK_IO_TIMEOUT) != CM_SUCCESS) {
-            LOG_RUN_WAR("[MEC]cs_tcp_send_timed fail, proto_code=%u.", proto_code);
+            LOG_DEBUG_WAR("[MEC]cs_tcp_send_timed fail, proto_code=%u.", proto_code);
             break;
         }
 
         if (cs_tcp_wait(link, CS_WAIT_FOR_READ, pipe->connect_timeout, &ready) != CM_SUCCESS) {
-            LOG_RUN_WAR("[MEC]cs_tcp_wait fail when cs_open_tcp_link.");
+            LOG_DEBUG_WAR("[MEC]cs_tcp_wait fail when cs_open_tcp_link.");
             break;
         }
 
         if (!ready) {
-            LOG_RUN_WAR("[MEC]connect wait fail, not ready.");
+            LOG_DEBUG_WAR("[MEC]connect wait fail, not ready.");
             CM_THROW_ERROR(ERR_TCP_TIMEOUT, "connect wait for server response");
             break;
         }
 
         // read link_ready_ack
         if (cs_tcp_recv_timed(link, (char *)ack, sizeof(link_ready_ack_t), CM_NETWORK_IO_TIMEOUT) != CM_SUCCESS) {
-            LOG_RUN_WAR("[MEC]cs_tcp_recv_timed fail, read ack timeout.");
+            LOG_DEBUG_WAR("[MEC]cs_tcp_recv_timed fail, read ack timeout.");
             break;
         }
 
@@ -133,13 +133,14 @@ static status_t cs_open_tcp_link(const char *host, uint16 port, cs_pipe_t *pipe,
         local_endian = (IS_BIG_ENDIAN ? (uint8)1 : (uint8)0);
         if (local_endian != ack->endian) {
             ack->flags = cs_reverse_int16(ack->flags);
+            ack->version = cs_reverse_int32(ack->version);
             pipe->options |= CSO_DIFFERENT_ENDIAN;
         }
         LOG_RUN_INF("[MEC]cs_open_tcp_link success.");
         return CM_SUCCESS;
     } while (0);
 
-    LOG_RUN_WAR("[MEC]cs_open_tcp_link fail.");
+    LOG_DEBUG_WAR("[MEC]cs_open_tcp_link fail.");
     /* close socket */
     (void)cs_close_socket(link->sock);
     link->sock = CS_INVALID_SOCKET;
@@ -236,7 +237,6 @@ status_t cs_send_fixed_size(cs_pipe_t *pipe, char *buf, int32 size)
     if (VIO_SEND(pipe, send_buf, remain_size, &send_size) != CM_SUCCESS) {
         return CM_ERROR;
     }
-    stat_record(SEND_PACK_SIZE, send_size);
 
     send_buf    += send_size;
     remain_size -= send_size;
@@ -257,7 +257,6 @@ status_t cs_send_fixed_size(cs_pipe_t *pipe, char *buf, int32 size)
         if (VIO_SEND(pipe, send_buf, remain_size, &send_size) != CM_SUCCESS) {
             return CM_ERROR;
         }
-        stat_record(SEND_PACK_SIZE, send_size);
 
         send_buf    += send_size;
         remain_size -= send_size;
@@ -337,7 +336,7 @@ status_t cs_wait(cs_pipe_t *pipe, uint32 wait_for, int32 timeout, bool32 *ready)
 }
 
 
-socket_t cs_get_socket_fd(cs_pipe_t* pipe)
+socket_t cs_get_socket_fd(const cs_pipe_t* pipe)
 {
     if (pipe->type == CS_TYPE_TCP) {
         return pipe->link.tcp.sock;

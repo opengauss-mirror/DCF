@@ -62,7 +62,7 @@ static inline bilist_node_t *cm_bilist_head(bilist_t *bilist)
     return bilist->head;
 }
 
-static inline bool32 cm_bilist_empty(bilist_t *bilist)
+static inline bool32 cm_bilist_empty(const bilist_t *bilist)
 {
     return bilist->count == 0;
 }

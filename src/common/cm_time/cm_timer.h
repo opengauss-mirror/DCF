@@ -47,6 +47,7 @@ typedef struct st_gs_timer {
 status_t cm_start_timer(gs_timer_t *timer);
 void cm_close_timer(gs_timer_t *timer);
 gs_timer_t *g_timer();
+void cm_set_timer(gs_timer_t *input_timer);
 
 #ifdef __cplusplus
 }

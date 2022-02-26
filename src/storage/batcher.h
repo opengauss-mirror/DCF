@@ -100,7 +100,7 @@ static inline void batcher_end(log_storage_t *storage, batcher_t *batcher)
 
 status_t batcher_flush(log_storage_t *storage, batcher_t *batcher);
 
-status_t batcher_append(log_storage_t *log_storage, batcher_t *batcher, log_entry_t *entry);
+status_t batcher_append(log_storage_t *log_storage, batcher_t *batcher, const log_entry_t *entry);
 
 #ifdef __cplusplus
 }

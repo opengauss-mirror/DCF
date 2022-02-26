@@ -40,7 +40,7 @@ status_t reactor_work(reactor_t *reactor)
     return CM_SUCCESS;
 }
 
-void proc_attached_failed_agent(mec_pipe_t *pipe)
+void proc_attached_failed_agent(const mec_pipe_t *pipe)
 {
     int32 code;
     const char *message = NULL;

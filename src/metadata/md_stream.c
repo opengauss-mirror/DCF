@@ -39,9 +39,21 @@ status_t check_node_id(uint32 node_id)
     return CM_SUCCESS;
 }
 
+status_t check_voting_weight(uint32 weight)
+{
+    if (weight >= CM_MAX_NODE_COUNT) {
+        LOG_DEBUG_ERR("[META]invalid voting weight");
+        return CM_ERROR;
+    }
+    return CM_SUCCESS;
+}
+
 status_t append_node_info(dcf_node_t** node_list, dcf_node_t* node)
 {
     if (check_node_id(node->node_id) != CM_SUCCESS) {
+        return CM_ERROR;
+    }
+    if (check_voting_weight(node->voting_weight) != CM_SUCCESS) {
         return CM_ERROR;
     }
     if (node_list == NULL) {
@@ -152,7 +164,6 @@ status_t check_stream_node_exist(dcf_streams_t* stream_list, uint32 stream_id, u
     return CM_SUCCESS;
 }
 
-
 status_t add_stream_member(dcf_streams_t* stream_list, uint32 stream_id, dcf_node_t* node_info)
 {
     uint32 node_id = node_info->node_id;
@@ -160,6 +171,9 @@ status_t add_stream_member(dcf_streams_t* stream_list, uint32 stream_id, dcf_nod
         return CM_ERROR;
     }
     if (check_node_id(node_id) != CM_SUCCESS) {
+        return CM_ERROR;
+    }
+    if (check_voting_weight(node_info->voting_weight) != CM_SUCCESS) {
         return CM_ERROR;
     }
 
@@ -241,7 +255,8 @@ status_t remove_stream_member(dcf_streams_t* stream_list, uint32 stream_id, uint
     return CM_SUCCESS;
 }
 
-status_t change_member_role(dcf_streams_t* stream_list, uint32 stream_id, uint32 node_id, dcf_role_t role)
+status_t change_stream_member(dcf_streams_t* stream_list, uint32 stream_id, uint32 node_id,
+    dcf_change_member_t *change_info)
 {
     if (check_stream_node_exist(stream_list, stream_id, node_id) != CM_SUCCESS) {
         return CM_ERROR;
@@ -249,7 +264,15 @@ status_t change_member_role(dcf_streams_t* stream_list, uint32 stream_id, uint32
 
     dcf_node_t *node = MD_GET_STREAMS_NODE(stream_list, stream_id, node_id);
     CM_CHECK_NULL_PTR(node);
-    node->default_role = role;
+    if (NEED_CHANGE_ROLE(change_info->op_type)) {
+        node->default_role = change_info->new_role;
+    }
+    if (NEED_CHANGE_GROUP(change_info->op_type)) {
+        node->group = change_info->new_group;
+    }
+    if (NEED_CHANGE_PRIORITY(change_info->op_type)) {
+        node->priority = change_info->new_priority;
+    }
     return CM_SUCCESS;
 }
 
@@ -322,6 +345,24 @@ status_t get_stream_node_roles(dcf_streams_t* stream_list, uint32 stream_id,
     return CM_SUCCESS;
 }
 
+status_t get_stream_node_weight(dcf_streams_t* stream_list, uint32 stream_id, uint32 node_id, uint32* weight)
+{
+    if (stream_isexists(stream_list, stream_id) == CM_FALSE) {
+        return CM_ERROR;
+    }
+
+    dcf_stream_t* stream = MD_GET_STREAM(stream_list, stream_id);
+    uint32 stream_node_count = stream->valid_nodes.count;
+    for (uint32 j = 0; j < stream_node_count; j++) {
+        dcf_node_t* node = (dcf_node_t *)cm_ptlist_get(&stream->valid_nodes, j);
+        CM_CHECK_NULL_PTR(node);
+        if (node->node_id == node_id) {
+            *weight = node->voting_weight;
+            return CM_SUCCESS;
+        }
+    }
+    return CM_ERROR;
+}
 
 status_t get_stream_node_ext(dcf_streams_t* stream_list, uint32 stream_id, uint32 node_id, dcf_node_t* node_info)
 {

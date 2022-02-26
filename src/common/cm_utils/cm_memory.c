@@ -307,7 +307,7 @@ void *galloc(uint64 size, mem_pool_t *mem)
 }
 
 #ifdef DB_DEBUG_VERSION
-static  void  check_zone_list(mem_zone_t *mem_zone)
+static  void  check_zone_list(const mem_zone_t *mem_zone)
 {
     for (int i = 0; i < MEM_NUM_FREELISTS; i++) {
         CM_ASSERT(mem_zone->list[i].count == 0);

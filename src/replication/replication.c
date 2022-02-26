@@ -96,11 +96,46 @@ void rep_stop()
 }
 
 status_t rep_wait_all_logs_applied(uint32 stream_id);
+status_t rep_wait_node_log_catchup(uint32 stream_id, uint32 node_id);
+
+#define MAX_TRY_PROMOTE_LEADER_TIMES    3
+#define MAX_SLEEP_CNT                   100
+
+void rep_try_promote_prio_leader(uint32 stream_id, uint32 prio_leader)
+{
+    if (!I_AM_LEADER(stream_id)) {
+        return;
+    }
+
+    (void)md_set_status(META_NORMAL);
+    clear_node_block_status(stream_id);
+    (void)rep_leader_reset(stream_id);
+
+    if (rep_wait_node_log_catchup(stream_id, prio_leader) == CM_SUCCESS) {
+        uint32 try_times = 0;
+        uint32 sleep_cnt = 0;
+        while (I_AM_LEADER(stream_id)) {
+            if (sleep_cnt % MAX_SLEEP_CNT == 0) {
+                try_times++;
+                if (try_times > MAX_TRY_PROMOTE_LEADER_TIMES) {
+                    return;
+                }
+                if (elc_promote_leader(stream_id, prio_leader) != CM_SUCCESS) {
+                    LOG_DEBUG_ERR("[REP]try_promote_prio_leader failed, prio_leader=%u.", prio_leader);
+                    return;
+                }
+                LOG_DEBUG_INF("[REP]try_promote_prio_leader %u times, prio_leader=%u.", try_times, prio_leader);
+            }
+            sleep_cnt++;
+            cm_sleep(CM_SLEEP_1_FIXED);
+        }
+    }
+}
 
 status_t rep_role_notify(uint32 stream_id, dcf_role_t old_role, dcf_role_t new_role)
 {
     (void)md_set_status(META_NORMAL);
-    (void)set_node_status(stream_id, NODE_NORMAL, 0);
+    clear_node_block_status(stream_id);
 
     if (new_role == DCF_ROLE_LEADER) {
         (void)rep_leader_reset(stream_id);
@@ -123,7 +158,6 @@ status_t rep_write(uint32 stream_id, const char* buffer, uint32 length, uint64 k
     uint64 index;
     if (!I_AM_LEADER(stream_id)) {
         LOG_DEBUG_ERR("[REP]current node is not leader.");
-        CM_THROW_ERROR(ERR_ROLE_NOT_LEADER);
         return CM_ERROR;
     }
 
@@ -154,6 +188,26 @@ status_t rep_write(uint32 stream_id, const char* buffer, uint32 length, uint64 k
 uint64 rep_get_commit_index(uint32 stream_id)
 {
     return rep_get_commit_log(stream_id).index;
+}
+
+uint64 rep_get_data_commit_index(uint32 stream_id)
+{
+    uint64 commit_idx = rep_get_commit_log(stream_id).index;
+    do {
+        log_entry_t *entry = stg_get_entry(stream_id, commit_idx);
+        if (entry == NULL) {
+            LOG_DEBUG_WAR("rep get data commit index %llu not found", commit_idx);
+            break;
+        }
+        if (ENTRY_TYPE(entry) == ENTRY_TYPE_LOG) {
+            stg_entry_dec_ref(entry);
+            break;
+        }
+        stg_entry_dec_ref(entry);
+        commit_idx--;
+    } while (commit_idx);
+
+    return commit_idx;
 }
 
 uint64 rep_get_last_index(uint32 stream_id)

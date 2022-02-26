@@ -76,7 +76,7 @@ status_t cs_read_bytes(cs_pipe_t *pipe, char *buf, uint32 max_size, int32 *size)
 status_t cs_read_fixed_size(cs_pipe_t *pipe, char *buf, int32 size);
 status_t cs_send_fixed_size(cs_pipe_t *pipe, char *buf, int32 size);
 status_t cs_send_bytes(cs_pipe_t *pipe, const char *buf, uint32 size);
-socket_t cs_get_socket_fd(cs_pipe_t *pipe);
+socket_t cs_get_socket_fd(const cs_pipe_t *pipe);
 
 /* This function build SSL channel using a accepted socket */
 status_t cs_ssl_accept(ssl_ctx_t *fd, cs_pipe_t *pipe);

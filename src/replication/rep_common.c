@@ -27,6 +27,7 @@
 #include "rep_leader.h"
 #include "rep_follower.h"
 #include "util_perf_stat.h"
+#include "util_profile_stat.h"
 
 #define REP_REMATCH_STEP 1000
 #define REP_REMATCH_COUNT 100
@@ -38,18 +39,6 @@ typedef struct st_rep_common_state_t {
     volatile uint32     can_write;
     volatile uint8      accept_log;
 }rep_common_state_t;
-
-typedef struct st_rep_tls_run_ctx_t {
-    char*   entrys_buf;
-    char*   appenlog_req_buf;
-}rep_tls_run_ctx_t;
-
-#ifdef WIN32
-static thread_local_var rep_tls_run_ctx_t g_tls_run_ctx = {NULL};
-#else
-static pthread_key_t g_rep_key;
-static pthread_once_t g_rep_once = PTHREAD_ONCE_INIT;
-#endif
 
 // for all role
 rep_common_state_t g_common_state[CM_MAX_STREAM_COUNT];
@@ -70,8 +59,6 @@ static void rep_apply_thread_entry(thread_t *thread);
 static void rep_stat_thread_entry(thread_t *thread);
 
 void print_state();
-
-static void rep_release_thread_buf(void *param);
 
 uint64 rep_get_tracekey()
 {
@@ -112,17 +99,17 @@ status_t rep_common_init()
         g_common_state[stream_id].can_write = CM_FALSE;
     }
 
-    if (cm_create_thread(rep_accept_thread_entry, SIZE_M(CM_2X_FIXED), NULL, &g_accept_thread) != CM_SUCCESS) {
+    if (cm_create_thread(rep_accept_thread_entry, 0, NULL, &g_accept_thread) != CM_SUCCESS) {
         LOG_DEBUG_ERR("[REP]cm_create_thread failed");
         return CM_ERROR;
     }
 
-    if (cm_create_thread(rep_apply_thread_entry, SIZE_M(CM_2X_FIXED), NULL, &g_apply_thread) != CM_SUCCESS) {
+    if (cm_create_thread(rep_apply_thread_entry, 0, NULL, &g_apply_thread) != CM_SUCCESS) {
         LOG_DEBUG_ERR("[REP]cm_create_thread failed");
         return CM_ERROR;
     }
 
-    if (cm_create_thread(rep_stat_thread_entry, SIZE_M(CM_2X_FIXED), NULL, &g_stat_thread) != CM_SUCCESS) {
+    if (cm_create_thread(rep_stat_thread_entry, 0, NULL, &g_stat_thread) != CM_SUCCESS) {
         LOG_DEBUG_ERR("[REP]cm_create_thread failed");
         return CM_ERROR;
     }
@@ -399,124 +386,6 @@ log_id_t rep_get_pre_term_log(uint32 stream_id, uint64 index)
     return pre_term_log;
 }
 
-static void rep_release_thread_buf(void *param)
-{
-    LOG_DEBUG_INF("[REP]free thread buff start.");
-    if (param != NULL) {
-        rep_tls_run_ctx_t* buff = (rep_tls_run_ctx_t*)param;
-        if (buff->appenlog_req_buf != NULL) {
-            free(buff->appenlog_req_buf);
-            buff->appenlog_req_buf = NULL;
-            LOG_DEBUG_INF("[REP]free thread buff (appenlog_req_buf) end.");
-        }
-
-        if (buff->entrys_buf != NULL) {
-            free(buff->entrys_buf);
-            buff->entrys_buf = NULL;
-            LOG_DEBUG_INF("[REP]free thread buff (entrys_buf) end.");
-        }
-
-        free(buff);
-    }
-    LOG_DEBUG_INF("[REP]free thread buff end.");
-}
-
-static void once_func(void)
-{
-#ifndef WIN32
-    if (pthread_key_create(&g_rep_key, rep_release_thread_buf) != 0) {
-        LOG_DEBUG_ERR("[REP]create key failed.");
-    }
-#endif
-}
-
-char* rep_get_entrys_buf(uint32 size)
-{
-    if (size == 0 || size > SIZE_G(1)) {
-        LOG_DEBUG_ERR("[REP]get entrys buf %u is not allowed", size);
-        return NULL;
-    }
-#ifdef WIN32
-    if (g_tls_run_ctx.entrys_buf == NULL) {
-        g_tls_run_ctx.entrys_buf = malloc(size);
-    }
-    if (g_tls_run_ctx.entrys_buf == NULL) {
-        LOG_RUN_ERR("[REP] malloc no memory");
-        return NULL;
-    }
-    return g_tls_run_ctx.entrys_buf;
-#else
-    if (pthread_once(&g_rep_once, once_func) != 0) {
-        LOG_RUN_ERR("[REP]get_entrys_buf, pthread_once failed.");
-        return NULL;
-    }
-    rep_tls_run_ctx_t* ctx = (rep_tls_run_ctx_t*)pthread_getspecific(g_rep_key);
-    if (ctx == NULL) {
-        ctx = malloc(sizeof(rep_tls_run_ctx_t));
-        if (ctx == NULL) {
-            LOG_RUN_ERR("[REP] malloc no memory");
-            return NULL;
-        }
-        (void)memset_s(ctx, sizeof(rep_tls_run_ctx_t), 0, sizeof(rep_tls_run_ctx_t));
-        if (pthread_setspecific(g_rep_key, ctx) != 0) {
-            LOG_RUN_ERR("[REP]get_entrys_buf, pthread_setspecific failed.");
-        }
-    }
-    if (ctx->entrys_buf == NULL) {
-        ctx->entrys_buf = malloc(size);
-        if (ctx->entrys_buf == NULL) {
-            LOG_RUN_ERR("[REP] malloc no memory");
-            return NULL;
-        }
-    }
-    return ctx->entrys_buf;
-#endif
-}
-
-char* rep_get_appenlog_req_buf(uint32 size)
-{
-    if (size == 0 || size > SIZE_G(1)) {
-        LOG_DEBUG_ERR("[REP]get appendlog req buf %u is not allowed", size);
-        return NULL;
-    }
-#ifdef WIN32
-    if (g_tls_run_ctx.appenlog_req_buf == NULL) {
-        g_tls_run_ctx.appenlog_req_buf = malloc(size);
-    }
-    if (g_tls_run_ctx.appenlog_req_buf == NULL) {
-        LOG_RUN_ERR("[REP] malloc no memory");
-        return NULL;
-    }
-    return g_tls_run_ctx.appenlog_req_buf;
-#else
-    if (pthread_once(&g_rep_once, once_func) != 0) {
-        LOG_RUN_ERR("[REP]get_append_req_buf, pthread_once failed.");
-        return NULL;
-    }
-
-    rep_tls_run_ctx_t* ctx = (rep_tls_run_ctx_t*)pthread_getspecific(g_rep_key);
-    if (ctx == NULL) {
-        ctx = malloc(sizeof(rep_tls_run_ctx_t));
-        if (ctx == NULL) {
-            LOG_RUN_ERR("[REP] malloc no memory");
-            return NULL;
-        }
-        (void)memset_s(ctx, sizeof(rep_tls_run_ctx_t), 0, sizeof(rep_tls_run_ctx_t));
-        if (pthread_setspecific(g_rep_key, ctx) != 0) {
-            LOG_RUN_ERR("[REP]get_append_req_buf, pthread_setspecific failed.");
-        }
-    }
-    if (ctx->appenlog_req_buf == NULL) {
-        ctx->appenlog_req_buf = malloc(size);
-        if (ctx->appenlog_req_buf == NULL) {
-            LOG_RUN_ERR("[REP] malloc no memory");
-            return NULL;
-        }
-    }
-    return ctx->appenlog_req_buf;
-#endif
-}
-
 int rep_register_after_writer(entry_type_t type, usr_cb_after_writer_t cb_func)
 {
     g_cb_after_writer[type] = cb_func;
@@ -616,7 +485,7 @@ void print_state()
     uint32 stream_count;
     static uint64 last = 0;
     uint64 now = g_timer()->now;
-    if (now - last < MICROSECS_PER_SECOND) {
+    if (now - last < DEFAULT_STAT_INTERVAL * MICROSECS_PER_SECOND) {
         return;
     }
     last = now;

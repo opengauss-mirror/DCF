@@ -70,7 +70,7 @@ static inline void index_buf_init(index_buf_t *ibuf)
     ibuf->capacity = 0;
 }
 
-static inline status_t index_buf_add(index_buf_t *ibuf, log_index_t *log_index)
+static inline status_t index_buf_add(index_buf_t *ibuf, const log_index_t *log_index)
 {
     if (ibuf->size >= ibuf->capacity) {
         uint32 buf_size = (ibuf->capacity + IBUF_EXTENT_SIZE) * sizeof(log_index_t);
@@ -97,7 +97,7 @@ static inline status_t index_buf_add(index_buf_t *ibuf, log_index_t *log_index)
     return CM_SUCCESS;
 }
 
-static inline status_t index_buf_add_batch(index_buf_t *dst, index_buf_t *src)
+static inline status_t index_buf_add_batch(index_buf_t *dst, const index_buf_t *src)
 {
     if (dst->size + src->size > dst->capacity) {
         uint32 buf_size = (dst->capacity + src->size + IBUF_EXTENT_SIZE) * sizeof(log_index_t);
@@ -129,7 +129,7 @@ static inline status_t index_buf_add_batch(index_buf_t *dst, index_buf_t *src)
     return CM_SUCCESS;
 }
 
-static inline status_t index_buf_get(index_buf_t *ibuf, uint32 index, log_index_t *log_index)
+static inline status_t index_buf_get(const index_buf_t *ibuf, uint32 index, log_index_t *log_index)
 {
     if (index >= ibuf->size) {
         return CM_ERROR;

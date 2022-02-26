@@ -35,7 +35,7 @@ static inline void encode_meta_info(stg_meta_t *stg_meta, char *buf)
     *(uint32*)(buf + META_OF_CHECKSUM)  = checksum;
 }
 
-static inline status_t decode_meta_info(stg_meta_t *stg_meta, char *buf)
+static inline status_t decode_meta_info(stg_meta_t *stg_meta, const char *buf)
 {
     stg_meta->version   = *(uint64*)(buf + META_OF_VERSION);
     stg_meta->curr_term = *(uint64*)(buf + META_OF_CURR_TERM);

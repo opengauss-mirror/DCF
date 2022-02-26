@@ -38,7 +38,6 @@
 extern "C" {
 #endif
 
-#define THREAD_STACK_SIZE    SIZE_M(2)
 #define BATCHER_BUF_SIZE     SIZE_M(2)
 
 typedef struct st_log_id {
@@ -159,7 +158,7 @@ static inline status_t stg_remove_file(char *home, char *file_name)
     return cm_remove_file(full_name);
 }
 
-static inline int32 log_id_cmp(log_id_t *id1, log_id_t *id2)
+static inline int32 log_id_cmp(const log_id_t *id1, const log_id_t *id2)
 {
     if (id1->term > id2->term) {
         return 1;

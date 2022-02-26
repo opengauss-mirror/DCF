@@ -64,12 +64,12 @@ typedef struct st_reactor_pool {
     reactor_t *reactors;
 } reactor_pool_t;
 
-static inline bool32 reactor_in_dedicated_mode(reactor_t *reactor)
+static inline bool32 reactor_in_dedicated_mode(const reactor_t *reactor)
 {
     return (uint32)reactor->channel_count < (uint32)reactor->avg_oagents;
 }
 
-void proc_attached_failed_agent(mec_pipe_t *pipe);
+void proc_attached_failed_agent(const mec_pipe_t *pipe);
 void reactor_entry(thread_t *thread);
 status_t reactor_set_oneshot(mec_pipe_t *pipe);
 status_t reactor_register_pipe(mec_pipe_t *pipe, reactor_pool_t *pool);

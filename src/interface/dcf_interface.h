@@ -53,6 +53,14 @@ typedef enum en_dcf_exception {
     DCF_EXCEPTION_CEIL,
 } dcf_exception_t;
 
+typedef enum en_dcf_commit_index_type {
+    DCF_INDEX_UNKNOWN = 0,
+    DCF_LOCAL_COMMIT_INDEX,
+    DCF_LEADER_COMMIT_INDEX,
+    DCF_CONSENSUS_COMMIT_INDEX,
+    DCF_INDEX_LEVEL_CEIL,
+} dcf_commit_index_type_t;
+
 /*
     param_name: The parameter types are as follows
     "ELECTION_TIMEOUT"   --unit:ms
@@ -180,11 +188,21 @@ EXPORT_API int dcf_register_thread_memctx_init(usr_cb_thread_memctx_init_t cb_fu
 EXPORT_API int dcf_start(unsigned int node_id, const char *cfg_str);
 
 /*
+    This interface can be used only at leader. (better performance).
     stream_id: Log stream channel id
     buffer: The data to write and replicate
     length: size of data buffer
 */
 EXPORT_API int dcf_write(unsigned int stream_id, const char* buffer, unsigned int length,
+    unsigned long long key, unsigned long long *index);
+
+/*
+This interface can be used at any node (leader, follower, etc.)
+    stream_id: Log stream channel id
+    buffer: The data to write and replicate
+    length: size of data buffer
+*/
+EXPORT_API int dcf_universal_write(unsigned int stream_id, const char *buffer, unsigned int length,
     unsigned long long key, unsigned long long *index);
 
 /*
@@ -278,6 +296,13 @@ EXPORT_API int dcf_change_member_role(unsigned int stream_id, unsigned int node_
     dcf_role_t new_role, unsigned int wait_timeout_ms);
 
 /*
+    change node role/group/priority etc.
+    change_str: change string list
+             string format example: '[{"stream_id":1,"node_id":1,"group":1,"priority":5,"role":"FOLLOWER"}]'
+*/
+EXPORT_API int dcf_change_member(const char *change_str, unsigned int wait_timeout_ms);
+
+/*
     promote the specified node to leader
 */
 EXPORT_API int dcf_promote_leader(unsigned int stream_id, unsigned int node_id, unsigned int wait_timeout_ms);
@@ -286,7 +311,7 @@ EXPORT_API int dcf_promote_leader(unsigned int stream_id, unsigned int node_id, 
     External trigger node timeout notification
     if stream_id== 0, means all stream the node in
 */
-EXPORT_API int dcf_timeout_notify(unsigned int stream_id, unsigned int node_id);
+EXPORT_API int dcf_timeout_notify(unsigned int stream_id);
 
 /*
     decrypt password
@@ -361,6 +386,51 @@ EXPORT_API int dcf_broadcast_msg(unsigned int stream_id, const char* msg, unsign
 * @return !=0  fail
 */
 EXPORT_API int dcf_pause_rep(unsigned int stream_id, unsigned int node_id, unsigned int time_us);
+
+/**
+* demote follower
+* @param [in]  stream_id
+* @return 0    success
+* @return !=0  fail
+*/
+EXPORT_API int dcf_demote_follower(unsigned int stream_id);
+
+/**
+* Get last log data commit index
+* @param [in]  stream_id
+* @param [in]  is_consensus, range[0, 1]
+* @param [out] index
+* @return 0    success
+* @return !=0  fail
+*/
+EXPORT_API int dcf_get_data_commit_index(unsigned int stream_id, dcf_commit_index_type_t index_type,
+    unsigned long long* index);
+
+/**
+* Get cur node's current_term and role
+* @param [in]  stream_id
+* @param [out]  term
+* @param [out] role
+* @return 0    success
+* @return !=0  fail
+*/
+EXPORT_API int dcf_get_current_term_and_role(unsigned int stream_id, unsigned long long* term, dcf_role_t* role);
+
+/**
+* Set cur node's election_priority
+* @param [in]  stream_id
+* @param [in]  priority
+* @return 0    success
+* @return !=0  fail
+*/
+EXPORT_API int dcf_set_election_priority(unsigned int stream_id, unsigned long long priority);
+
+/**
+* set global timer to dcf, use by dcc.
+* @param [in]  timer ptr of struct:gs_timer_t
+* @return void
+*/
+EXPORT_API void dcf_set_timer(void *timer);
 
 #ifdef __cplusplus
 }

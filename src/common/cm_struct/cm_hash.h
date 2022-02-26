@@ -94,7 +94,7 @@ typedef struct st_hash_map {
 }hash_map_t;
 
 static inline status_t cm_hmap_init(hash_map_t *hmap, malloc_t f_alloc, void *mem_ctx,
-    hash_funcs_t *funcs, uint32 buckets)
+    const hash_funcs_t *funcs, uint32 buckets)
 {
     uint32 size = sizeof(hash_node_t *) * buckets;
     CM_RETURN_IFERR(f_alloc(mem_ctx, size, (void **)&hmap->buckets));

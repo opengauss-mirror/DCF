@@ -131,40 +131,50 @@ status_t mec_get_message_buf(mec_message_t *pack, uint32 dst_inst, msg_priv_t pr
 {
     mq_context_t *mq_ctx = get_send_mq_ctx();
     msg_item_t *item = NULL;
-
-    if (dst_inst != CM_INVALID_NODE_ID) {
-        uint32 buf_size = (priv == PRIV_LOW) ? MEC_ACTL_MSG_BUFFER_SIZE(get_mec_profile())
-            : MEC_PRIV_MESSAGE_BUFFER_SIZE;
-        CM_RETURN_IFERR(mec_alloc_msg_item_from_private_pool(&mq_ctx->private_pool[dst_inst][priv], &item,
-            buf_size, mq_ctx->private_msg_pool_extent[priv], &mq_ctx->private_pool_init_lock));
-        if (item != NULL) {
-            MEC_MESSAGE_ATTACH(pack, get_mec_profile(), priv, item->buffer);
-            return CM_SUCCESS;
-        }
-    }
-
+    uint32 buf_size = (priv == PRIV_LOW) ? MEC_ACTL_MSG_BUFFER_SIZE(get_mec_profile()) : MEC_PRIV_MESSAGE_BUFFER_SIZE;
     message_pool_t *pool = &mq_ctx->msg_pool[priv];
+    timespec_t begin = cm_clock_now();
+    timespec_t last = begin;
+    cm_event_t *wait_event = &pool->event;
+
     while (1) {
+        if (dst_inst != CM_INVALID_NODE_ID) {
+            CM_RETURN_IFERR(mec_alloc_msg_item_from_private_pool(&mq_ctx->private_pool[dst_inst][priv], &item,
+                buf_size, mq_ctx->private_msg_pool_extent[priv], &mq_ctx->private_pool_init_lock));
+            if (item != NULL) {
+                MEC_MESSAGE_ATTACH(pack, get_mec_profile(), priv, item->buffer);
+                return CM_SUCCESS;
+            }
+        }
         if (mec_alloc_msg_item(pool, &item) != CM_SUCCESS) {
             LOG_DEBUG_ERR("[MEC]mec_get_message_buf fail. priv[%u], err code %d, err msg %s",
-                          priv, cm_get_error_code(), cm_get_errormsg(cm_get_error_code()));
+                priv, cm_get_error_code(), cm_get_errormsg(cm_get_error_code()));
             return CM_ERROR;
         }
         if (item != NULL) {
             MEC_MESSAGE_ATTACH(pack, get_mec_profile(), priv, item->buffer);
             return CM_SUCCESS;
         }
-        while (1) {
-            if (get_mec_ctx()->phase != SHUTDOWN_PHASE_NOT_BEGIN) {
-                LOG_DEBUG_ERR("[MEC]mec_get_message_buf fail,not begin now. priv[%u], err code %d, err msg %s",
-                              priv, cm_get_error_code(), cm_get_errormsg(cm_get_error_code()));
+        if (get_mec_ctx()->phase != SHUTDOWN_PHASE_NOT_BEGIN) {
+            LOG_DEBUG_ERR("[MEC]mec_get_message_buf fail,not begin now. priv[%u], err code %d, err msg %s",
+                          priv, cm_get_error_code(), cm_get_errormsg(cm_get_error_code()));
+            return CM_ERROR;
+        }
+        timespec_t now = cm_clock_now();
+        if ((now - last) > MICROSECS_PER_SECOND) {
+            LOG_DEBUG_ERR("[MEC]wait for free buffer more than %llu seconds, dst_inst[%u], priv[%u].",
+                (now - begin) / MICROSECS_PER_SECOND, dst_inst, priv);
+            last = now;
+            if ((now - begin) > MICROSECS_PER_SECOND * CM_3X_FIXED) {
                 return CM_ERROR;
             }
-            if (pool->free_count != 0 || cm_event_timedwait(&pool->event, CM_SLEEP_50_FIXED) == CM_SUCCESS) {
-                break;
-            }
         }
+        if (dst_inst != CM_INVALID_NODE_ID && mq_ctx->private_pool[dst_inst][priv]) {
+            wait_event = &mq_ctx->private_pool[dst_inst][priv]->event;
+        }
+        (void)cm_event_timedwait(wait_event, CM_SLEEP_1_FIXED);
     }
+
     return CM_SUCCESS;
 }
 
@@ -205,22 +215,13 @@ static status_t mec_read_message(cs_pipe_t *pipe, mec_message_t *msg)
         return CM_ERROR;
     }
 
-    uint64 end_time1;
-    if (cs_read_fixed_size(pipe, (char *)&end_time1, MEC_CHKSUM_SIZE) != CM_SUCCESS) {
-        return CM_ERROR;
-    }
-    if (end_time1 != msg->head->time1) {
-        LOG_DEBUG_ERR("[MEC]end_time1 %llu not equal with head %llu.", end_time1, msg->head->time1);
-        return CM_ERROR;
-    }
-
     set_time1(msg->head);
 
     return CM_SUCCESS;
 }
 
 
-status_t mec_process_message(mec_pipe_t *pipe, mec_message_t *msg)
+status_t mec_process_message(const mec_pipe_t *pipe, mec_message_t *msg)
 {
     dtc_msgqueue_t *my_queue = NULL;
     mq_context_t *mq_ctx = get_recv_mq_ctx();
@@ -243,7 +244,7 @@ status_t mec_process_message(mec_pipe_t *pipe, mec_message_t *msg)
     }
     msgitem->msg = msg->buffer;
     uint32 index = 0;
-    if (pipe->priv) {
+    if (pipe->priv == PRIV_LOW) {
         index = cm_hash_uint32((src_inst & 0xFFFFFF) | (channel_id << 24), DTC_MSG_QUEUE_NUM) + 1;
     }
     CM_MFENCE;
@@ -416,6 +417,15 @@ void mec_proc_recv_pipe(struct st_mec_pipe *pipe, bool32 *is_continue)
         }                                                                   \
     } while (0)
 
+static void mec_show_connect_error_info(const char *url)
+{
+    static timespec_t last = 0;
+    if ((cm_clock_now() - last) > MICROSECS_PER_SECOND) {
+        LOG_DEBUG_ERR("[MEC]cs_connect fail,peer_url=%s, err code %d, err msg %s.", url, cm_get_error_code(),
+            cm_get_errormsg(cm_get_error_code()));
+        last = cm_clock_now();
+    }
+}
 
 void mec_try_connect(mec_pipe_t *pipe)
 {
@@ -430,6 +440,7 @@ void mec_try_connect(mec_pipe_t *pipe)
         return;
     }
 
+    cm_reset_error();
     remote_host = MEC_HOST_NAME(MEC_INSTANCE_ID(channel->id), profile);
     PRTS_RETVOID_IFERR(snprintf_s(peer_url, MEC_URL_BUFFER_SIZE, MEC_URL_BUFFER_SIZE - 1, "%s:%d", remote_host,
         MEC_HOST_PORT(MEC_INSTANCE_ID(channel->id), profile)));
@@ -441,18 +452,15 @@ void mec_try_connect(mec_pipe_t *pipe)
     }
     if (cs_connect(peer_url, &pipe->send_pipe, NULL) != CM_SUCCESS) {
         cm_thread_unlock(&pipe->send_lock);
-        LOG_RUN_WAR("[MEC]cs_connect fail,peer_url=%s, err code %d, err msg %s.", peer_url, cm_get_error_code(),
-            cm_get_errormsg(cm_get_error_code()));
+        mec_show_connect_error_info(peer_url);
         return;
     }
 
     if (g_ssl_enable) {
-        LOG_RUN_INF("[MEC]mec_try_connect: start cs_ssl_connect...");
         if (cs_ssl_connect(get_mec_ptr()->ssl_connector_fd, &pipe->send_pipe) != CM_SUCCESS) {
             cs_disconnect(&pipe->send_pipe);
             cm_thread_unlock(&pipe->send_lock);
-            LOG_RUN_WAR("[MEC]cs_ssl_connect fail,peer_url=%s, err code %d, err msg %s.", peer_url, cm_get_error_code(),
-                cm_get_errormsg(cm_get_error_code()));
+            mec_show_connect_error_info(peer_url);
             return;
         }
     }
@@ -463,8 +471,8 @@ void mec_try_connect(mec_pipe_t *pipe)
     if (cs_send_bytes(&pipe->send_pipe, (const char *)&head, sizeof(mec_message_head_t)) != CM_SUCCESS) {
         cs_disconnect(&pipe->send_pipe);
         cm_thread_unlock(&pipe->send_lock);
-        LOG_RUN_WAR("[MEC]cs_send_bytes fail, instance %u channel id %u, priv %d.", MEC_INSTANCE_ID(pipe->channel->id),
-            MEC_CHANNEL_ID(pipe->channel->id), pipe->priv);
+        LOG_DEBUG_WAR("[MEC]cs_send_bytes fail, instance %u channel id %u, priv %d.",
+            MEC_INSTANCE_ID(pipe->channel->id), MEC_CHANNEL_ID(pipe->channel->id), pipe->priv);
         return;
     }
     pipe->send_pipe_active = CM_TRUE;
@@ -635,7 +643,7 @@ void mec_disconnect(uint32 inst_id)
     return;
 }
 
-void mec_init_channels_param(mec_channel_t *channel, mec_profile_t *profile)
+void mec_init_channels_param(mec_channel_t *channel, const mec_profile_t *profile)
 {
     for (uint32 k = 0; k < PRIV_CEIL; k++) {
         mec_pipe_t *pipe = &channel->pipe[k];
@@ -832,6 +840,25 @@ static status_t mec_init_pipe(cs_pipe_t *pipe)
     return CM_SUCCESS;
 }
 
+static status_t check_if_head_info_valid(mec_message_head_t *head)
+{
+    mec_context_t *mec_ctx = get_mec_ctx();
+
+    if (head->cmd != (uint8)MEC_CMD_CONNECT) {
+        LOG_RUN_ERR("[MEC]cmd %u invalid when building connection.", head->cmd);
+        return CM_ERROR;
+    }
+    if (head->stream_id >= get_mec_profile()->channel_num || head->src_inst >= CM_MAX_NODE_COUNT) {
+        LOG_DEBUG_ERR("[MEC]invalid stream_id %u or src_inst %u", head->stream_id, head->src_inst);
+        return CM_ERROR;
+    }
+    if (mec_ctx->channels[head->src_inst] == NULL) {
+        LOG_RUN_WAR("[MEC]channel for inst[%u] not already malloc, can't accept now.", head->src_inst);
+        return CM_ERROR;
+    }
+    return CM_SUCCESS;
+}
+
 static status_t mec_accept(cs_pipe_t *pipe)
 {
     bool32          ready;
@@ -861,19 +888,19 @@ static status_t mec_accept(cs_pipe_t *pipe)
         return CM_ERROR;
     }
 
-    if (head.cmd != (uint8)MEC_CMD_CONNECT) {
-        LOG_RUN_ERR("[MEC]cmd %u invalid when building connection.", head.cmd);
-        return CM_ERROR;
-    }
-    msg_priv_t priv = CS_PRIV_LOW(head.flags) ? PRIV_LOW : PRIV_HIGH;
-    if (mec_ctx->channels[head.src_inst] == NULL) {
-        LOG_RUN_WAR("[MEC]channel for inst[%u] not already malloc, can't accept now.", head.src_inst);
-        return CM_ERROR;
-    }
+    CM_RETURN_IFERR(check_if_head_info_valid(&head));
+
     channel = &mec_ctx->channels[head.src_inst][head.stream_id];
+    msg_priv_t priv = CS_PRIV_LOW(head.flags) ? PRIV_LOW : PRIV_HIGH;
     mec_pipe_t *mec_pipe = &channel->pipe[priv];
+    uint32 count = 0;
     while (mec_pipe->is_reg || mec_pipe->attach[RECV_MODE].agent != NULL) {
         cm_sleep(CM_SLEEP_10_FIXED);
+        count++;
+        if (count > CM_100X_FIXED) {
+            LOG_RUN_ERR("[MEC]wait old pipe detach failed.stream_id %u src_inst %u", head.stream_id, head.src_inst);
+            return CM_ERROR;
+        }
     }
     mec_close_recv_pipe(mec_pipe);
     cm_thread_lock(&mec_pipe->recv_lock);
@@ -1399,7 +1426,7 @@ void fragment_free_ctrl(fragment_ctrl_t *ctrl)
     cm_spin_unlock(&pool->lock);
 }
 
-fragment_ctrl_t *find_fragment_ctrl(fragment_bucket_t *bucket, fragment_key_t *key)
+fragment_ctrl_t *find_fragment_ctrl(fragment_bucket_t *bucket, const fragment_key_t *key)
 {
     fragment_ctrl_pool_t *pool = &get_fragment_ctx()->ctrl_pool;
     fragment_ctrl_t *ctrl = NULL;
@@ -1418,7 +1445,7 @@ fragment_ctrl_t *find_fragment_ctrl(fragment_bucket_t *bucket, fragment_key_t *k
     return NULL;
 }
 
-static status_t check_fragment_buffer_space(fragment_ctrl_t *ctrl, mec_message_head_t *head)
+static status_t check_fragment_buffer_space(fragment_ctrl_t *ctrl, const mec_message_head_t *head)
 {
     uint32 new_size = ctrl->size;
     uint32 old_size = ((mec_message_head_t *)ctrl->buffer)->size;
@@ -1546,7 +1573,7 @@ static status_t mec_verify_ssl_key_pwd(ssl_config_t *ssl_cfg, char *plain, uint3
 
     // check password which encrypted by DCF
     CM_RETURN_IFERR(md_get_param(DCF_PARAM_SSL_PWD_PLAINTEXT, &keypwd));
-    if (!CM_IS_EMPTY_STR(keypwd.inter_pwd.cipher_text)) {
+    if (keypwd.inter_pwd.cipher_len > 0) {
         CM_RETURN_IFERR(cm_decrypt_pwd(&keypwd.inter_pwd, (uchar*)plain, &size));
         ssl_cfg->key_password = plain;
         return CM_SUCCESS;
@@ -1568,7 +1595,7 @@ static status_t mec_verify_ssl_key_pwd(ssl_config_t *ssl_cfg, char *plain, uint3
 static status_t mec_init_ssl()
 {
     ssl_config_t ssl_cfg = { 0 };
-    char plain[CM_PASSWD_MAX_LEN + 1];
+    char plain[CM_PASSWD_MAX_LEN + 1] = { 0 };
     param_value_t ca, key, crl, cert, cipher;
 
     // Required parameters
@@ -1846,7 +1873,7 @@ status_t mec_scale_out(uint32 inst_id, uint32 channel_id)
 }
 
 
-bool32 mec_check_last(uint64 inst_bits[INSTS_BIT_SZ], uint32 inst_id)
+bool32 mec_check_last(const uint64 inst_bits[INSTS_BIT_SZ], uint32 inst_id)
 {
     for (uint32 i = inst_id + 1; i < CM_MAX_NODE_COUNT; i++) {
         if (MEC_IS_INST_SEND(inst_bits, i)) {
@@ -1856,7 +1883,7 @@ bool32 mec_check_last(uint64 inst_bits[INSTS_BIT_SZ], uint32 inst_id)
     return CM_TRUE;
 }
 
-void get_broadcast_insts(uint64 inst_bits[INSTS_BIT_SZ], char *buffer, uint32 buff_size)
+void get_broadcast_insts(const uint64 inst_bits[INSTS_BIT_SZ], char *buffer, uint32 buff_size)
 {
     text_t text = {.str = buffer,
                    .len = 0};

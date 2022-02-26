@@ -161,7 +161,7 @@ typedef struct st_lex {
 #define DOUBLE_QUOTATION '"'
 
 status_t lex_extract_first(lang_text_t *text, word_t *word);
-status_t lex_extract_first_ex(lang_text_t *text, word_t *word);
+status_t lex_extract_first_ex(const lang_text_t *text, word_t *word);
 status_t lex_fetch(lex_t *lex, word_t *word);
 status_t lex_fetch_in_hint(lex_t *lex, word_t *word);
 status_t lex_expected_fetch(lex_t *lex, word_t *word);
@@ -247,12 +247,12 @@ static inline char lex_skip_line_breaks(lex_t *lex)
     return LEX_CURR;
 }
 
-static inline bool32 lex_eof(lex_t *lex)
+static inline bool32 lex_eof(const lex_t *lex)
 {
     return lex->curr_text->len == 0;
 }
 
-static inline status_t lex_push(lex_t *lex, lang_text_t *text)
+static inline status_t lex_push(lex_t *lex, const lang_text_t *text)
 {
     lex_stack_item_t *item = NULL;
 
@@ -430,7 +430,7 @@ static inline void lex_remove_all_cbrackets(lang_text_t *text)
     lex_remove_all_brackets(text, CURLY_BRACKETS);
 }
 
-static inline bool32 is_variant(word_t *word)
+static inline bool32 is_variant(const word_t *word)
 {
     if (word->type == WORD_TYPE_VARIANT || word->type == WORD_TYPE_PL_NEW_COL ||
         word->type == WORD_TYPE_PL_OLD_COL || word->type == WORD_TYPE_PL_ATTR ||
@@ -445,7 +445,7 @@ static inline bool32 is_variant(word_t *word)
     return CM_FALSE;
 }
 
-static inline bool32 is_unamable_keyword(word_t *word)
+static inline bool32 is_unamable_keyword(const word_t *word)
 {
     if (word->type == WORD_TYPE_KEYWORD) {
         return !word->namable;

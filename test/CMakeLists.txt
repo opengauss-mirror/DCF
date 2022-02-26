@@ -1,1 +1,10 @@
 add_subdirectory(test_main)
+add_subdirectory(test_mec)
+add_subdirectory(test_perf)
+add_subdirectory(consistency)
+add_subdirectory(tools)
+
+OPTION(UT "option for UT" OFF)
+if (UT)
+add_subdirectory(UT)
+endif()

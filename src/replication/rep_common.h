@@ -63,8 +63,6 @@ void        rep_set_accept_flag(uint32 stream_id);
 void        rep_set_can_write_flag(uint32 stream_id, uint32 flag);
 uint32      rep_get_can_write_flag(uint32 stream_id);
 log_id_t    rep_get_pre_term_log(uint32 stream_id, uint64 index);
-char*       rep_get_entrys_buf(uint32 size);
-char*       rep_get_appenlog_req_buf(uint32 size);
 void        rep_apply_trigger();
 void        rep_set_cluster_min_apply_idx(uint32 stream_id, uint64 cluster_min_apply_id);
 uint64      rep_get_cluster_min_apply_idx(uint32 stream_id);

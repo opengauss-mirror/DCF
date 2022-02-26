@@ -148,7 +148,7 @@ static status_t cal_cpu_usage(monitor_status_t *monitor_status, uint32 cur, cpu_
 
     fir_count = fir->user + fir->nice + fir->system + fir->idle + fir->iowait + fir->irq + fir->softrq;
     sec_count = sec->user + sec->nice + sec->system + sec->idle + sec->iowait + sec->irq + sec->softrq;
-    user_and_sys_count = llabs(sec->user - fir->user + sec->system - fir->system);
+    user_and_sys_count = llabs(((sec->user - fir->user) + sec->system) - fir->system);
     if ((sec_count - fir_count) == 0) {
         load_rate->cpu_rate = 0;
         return CM_SUCCESS;

@@ -27,9 +27,13 @@
 
 #define DAY_USECS (uint64)86400000000
 static gs_timer_t g_timer_t;
+static gs_timer_t *g_register_timer = NULL;
 
 gs_timer_t *g_timer()
 {
+    if (g_register_timer != NULL) {
+        return g_register_timer;
+    }
     return &g_timer_t;
 }
 
@@ -56,12 +60,12 @@ static void timer_proc(thread_t *thread)
 
     start_time = cm_now();
 
-    (void)cm_set_thread_name("timer");
+    (void)cm_set_thread_name("dcf_timer");
 
 #ifndef _WIN32
     struct timespec tq, tr;
     tq.tv_sec = 0;
-    tq.tv_nsec = 10000; // 10us
+    tq.tv_nsec = 100000; // 0.1ms
 #endif
 
     while (!thread->closed) {
@@ -84,6 +88,10 @@ static void timer_proc(thread_t *thread)
 
 status_t cm_start_timer(gs_timer_t *input_timer)
 {
+    if (g_register_timer != NULL) {
+        return CM_SUCCESS;
+    }
+
     cm_now_detail((date_detail_t *)&input_timer->detail);
     input_timer->now = cm_encode_date((const date_detail_t *)&input_timer->detail);
     input_timer->today = (date_t)(input_timer->now / (int64)DAY_USECS) * (int64)DAY_USECS;
@@ -96,5 +104,13 @@ status_t cm_start_timer(gs_timer_t *input_timer)
 
 void cm_close_timer(gs_timer_t *input_timer)
 {
+    if (g_register_timer != NULL) {
+        return;
+    }
     cm_close_thread(&input_timer->thread);
+}
+
+void cm_set_timer(gs_timer_t *input_timer)
+{
+    g_register_timer = input_timer;
 }

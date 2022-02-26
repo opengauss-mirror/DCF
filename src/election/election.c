@@ -25,17 +25,19 @@
 #include "election.h"
 #include "elc_msg_proc.h"
 #include "elc_stream.h"
+#include "elc_status_check.h"
 #include "metadata.h"
 #include "cm_thread.h"
 #include "cm_utils.h"
 #include "cm_timer.h"
 #include "cb_func.h"
+#include "util_defs.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-thread_t g_hb_check_thread;
+thread_t g_status_check_thread;
 thread_t g_status_notify_thread;
 static bool32 g_elc_init = CM_FALSE;
 
@@ -76,12 +78,16 @@ status_t elc_judge_term(uint32 stream_id, uint64 term)
     return CM_SUCCESS;
 }
 
-status_t check_timeout_proc(uint32 stream_id, uint32 node_id, date_t now)
+status_t check_timeout_proc(uint32 stream_id, uint32 node_id, timespec_t now)
 {
     dcf_role_t role = elc_stream_get_role(stream_id);
     status_t ret = CM_SUCCESS;
     switch (role) {
         case DCF_ROLE_FOLLOWER:
+            if (!elc_stream_can_switch_now(stream_id)) {
+                LOG_DEBUG_INF("[ELC]elc_switch_thresold is not reached, stream_id=%u, node_id=%u", stream_id, node_id);
+                break;
+            }
             LOG_RUN_WAR("[ELC]heartbeat timeout, begin voting, stream_id=%u, node_id=%u", stream_id, node_id);
             ret = elc_stream_set_timeout(stream_id, now);
             if (ret != CM_SUCCESS) {
@@ -114,11 +120,11 @@ status_t check_timeout_proc(uint32 stream_id, uint32 node_id, date_t now)
     return ret;
 }
 
-status_t check_timeout(uint32 stream_id, date_t now, uint32 elc_timeout)
+status_t check_timeout(uint32 stream_id, timespec_t now, uint32 elc_timeout)
 {
     elc_stream_lock_s(stream_id);
     uint32 node_id = elc_stream_get_current_node();
-    date_t last_hb_time = elc_stream_get_timeout(stream_id);
+    timespec_t last_hb_time = elc_stream_get_timeout(stream_id);
     if (now < last_hb_time) {
         LOG_RUN_INF("no need to check timeout, now:%llu, last_hb_time:%lld", now, last_hb_time);
         elc_stream_unlock(stream_id);
@@ -129,11 +135,11 @@ status_t check_timeout(uint32 stream_id, date_t now, uint32 elc_timeout)
     uint32 rand_value;
     uint32 votefor = elc_stream_get_votefor(stream_id);
     if (votefor != CM_INVALID_NODE_ID) {
-        rand_value = elc_timeout;
+        rand_value = elc_timeout + cm_random(elc_timeout) / CM_10X_FIXED;
     } else {
         rand_value = cm_random(elc_timeout);
-        LOG_DEBUG_INF("[ELC]no votefor, elc_timeout rand_value=%u", rand_value);
     }
+    LOG_DEBUG_INF("[ELC]votefor=%u, elc_timeout rand_value=%u", votefor, rand_value);
     if (interval_time < rand_value) {
         elc_stream_unlock(stream_id);
         return CM_SUCCESS;
@@ -158,53 +164,17 @@ status_t check_timeout(uint32 stream_id, date_t now, uint32 elc_timeout)
     return ret;
 }
 
-static bool32 elc_need_demote_follow(uint32 stream_id, date_t now)
-{
-    uint32 elc_timeout = elc_stream_get_elc_timeout_ms();
-    uint32 hb_ack_timeout_num = 0;
-    uint32 voter_num = 0;
-    dcf_node_role_t node_list[CM_MAX_NODE_COUNT];
-    uint32 node_count;
-    uint32 local_node_id = md_get_cur_node(stream_id);
-    dcf_role_t default_role;
-    if (elc_stream_get_work_mode(stream_id) != WM_NORMAL) {
-        return CM_FALSE;
-    }
-    if (md_get_stream_node_roles(stream_id, node_list, &node_count) != CM_SUCCESS ||
-        md_get_voter_num(stream_id, &voter_num) != CM_SUCCESS) {
-        return CM_FALSE;
-    }
-    for (uint32 i = 0; i < node_count; i++) {
-        uint32 node_id = node_list[i].node_id;
-        default_role  = node_list[i].default_role;
-        if (node_id == local_node_id || default_role == DCF_ROLE_PASSIVE) {
-            continue;
-        }
-        uint64 hb_ack = (uint64)(now - elc_stream_get_hb_ack_time(stream_id, node_id));
-        if (hb_ack / MICROSECS_PER_MILLISEC > elc_timeout * CM_2X_FIXED) {
-            LOG_DEBUG_WAR("[ELC]recv heartbeat ack timout from node_id=%u\n", node_id);
-            hb_ack_timeout_num++;
-        }
-        if (hb_ack_timeout_num >= ((voter_num + 1) / CM_2X_FIXED)) {
-            LOG_DEBUG_INF("[ELC]Leader need demote follow, local_node_id:%u hb_ack_timeout_num:%u", local_node_id,
-                hb_ack_timeout_num);
-            return CM_TRUE;
-        }
-    }
-    return CM_FALSE;
-}
-
 #define HB_SLEEP_TIME 100
-void elc_hb_check_entry(thread_t *thread)
+void elc_status_check_entry(thread_t *thread)
 {
-    (void)cm_set_thread_name("heartbeat_check");
-    date_t last_hb = g_timer()->now;
+    (void)cm_set_thread_name("elc_status_check");
+    timespec_t last_hb = cm_clock_now();
     uint32 node_num = 0;
 
     while (!thread->closed) {
         uint32 hb_interval = elc_stream_get_hb_interval_ms();
         uint32 elc_timeout = elc_stream_get_elc_timeout_ms();
-        date_t now = g_timer()->now;
+        timespec_t now = cm_clock_now();
         bool32 need_hb = (((uint64)(now - last_hb)) / MICROSECS_PER_MILLISEC >= hb_interval) ? CM_TRUE : CM_FALSE;
 
         for (uint32 i = 0; i < CM_MAX_STREAM_COUNT; i++) {
@@ -218,16 +188,25 @@ void elc_hb_check_entry(thread_t *thread)
                 continue;
             }
 
-            status_t ret;
+            if (need_hb) {
+                last_hb = now;
+                // send elc status info
+                elc_stream_lock_s(i);
+                if (elc_send_status_info(i) != CM_SUCCESS) {
+                    LOG_DEBUG_ERR("[ELC]send elc status info failed, stream_id=%u.", i);
+                }
+                elc_stream_unlock(i);
+            }
+
+            status_t ret = CM_SUCCESS;
             if (need_hb && elc_get_node_role(i) == DCF_ROLE_LEADER) {
                 last_hb = now;
                 elc_stream_lock_s(i);
-                if ((elc_stream_get_run_mode() == ELECTION_AUTO) && elc_need_demote_follow(i, now)) {
+                if ((elc_stream_get_run_mode() == ELECTION_AUTO) && elc_need_demote_follow(i, now, CM_2X_FIXED)) {
                     elc_stream_unlock(i);
                     ret = elc_demote_follower(i); // don't recieve follow node's hb ack, demote to follower
                     LOG_RUN_INF("[ELC]elc demote follower, stream_id=%u", i);
                 } else {
-                    ret = elc_hb_req(i, MEC_CMD_HB_REQUEST_RPC_REQ);
                     elc_stream_unlock(i);
                 }
             } else {
@@ -266,20 +245,27 @@ status_t elc_init()
     if (ret != CM_SUCCESS) {
         return ret;
     }
+
+    ret = elc_status_check_init();
+    if (ret != CM_SUCCESS) {
+        return ret;
+    }
+
     register_msg_process(MEC_CMD_VOTE_REQUEST_RPC_REQ, elc_vote_proc, PRIV_HIGH);
     register_msg_process(MEC_CMD_VOTE_REQUEST_RPC_ACK, elc_vote_ack_proc, PRIV_HIGH);
-    register_msg_process(MEC_CMD_HB_REQUEST_RPC_REQ, elc_hb_proc, PRIV_HIGH);
-    register_msg_process(MEC_CMD_HB_REQUEST_RPC_ACK, elc_hb_ack_proc, PRIV_HIGH);
     register_msg_process(MEC_CMD_PROMOTE_LEADER_RPC_REQ, elc_promote_proc, PRIV_HIGH);
 
-    ret = cm_create_thread(elc_hb_check_entry, 0, NULL, &g_hb_check_thread);
+    register_msg_process(MEC_CMD_STATUS_CHECK_RPC_REQ, elc_status_check_req_proc, PRIV_HIGH);
+    register_msg_process(MEC_CMD_STATUS_CHECK_RPC_ACK, elc_status_check_ack_proc, PRIV_HIGH);
+
+    ret = cm_create_thread(elc_status_check_entry, 0, NULL, &g_status_check_thread);
     if (ret != CM_SUCCESS) {
         return ret;
     }
 
     ret = cm_create_thread(elc_status_notify_entry, 0, NULL, &g_status_notify_thread);
     if (ret != CM_SUCCESS) {
-        cm_close_thread(&g_hb_check_thread);
+        cm_close_thread(&g_status_check_thread);
         return ret;
     }
 
@@ -293,11 +279,12 @@ void elc_deinit()
     if (g_elc_init) {
         unregister_msg_process(MEC_CMD_VOTE_REQUEST_RPC_REQ);
         unregister_msg_process(MEC_CMD_VOTE_REQUEST_RPC_ACK);
-        unregister_msg_process(MEC_CMD_HB_REQUEST_RPC_REQ);
-        unregister_msg_process(MEC_CMD_HB_REQUEST_RPC_ACK);
         unregister_msg_process(MEC_CMD_PROMOTE_LEADER_RPC_REQ);
 
-        cm_close_thread(&g_hb_check_thread);
+        unregister_msg_process(MEC_CMD_STATUS_CHECK_RPC_REQ);
+        unregister_msg_process(MEC_CMD_STATUS_CHECK_RPC_ACK);
+
+        cm_close_thread(&g_status_check_thread);
         cm_close_thread(&g_status_notify_thread);
     }
     g_elc_init = CM_FALSE;
@@ -327,6 +314,64 @@ dcf_role_t elc_get_node_role(uint32 stream_id)
     return role;
 }
 
+status_t elc_get_current_term_and_role(uint32 stream_id, uint64 *term, dcf_role_t *role)
+{
+    if (!g_elc_init) {
+        LOG_RUN_ERR("[ELC]election module has not been initialized");
+        return CM_ERROR;
+    }
+    elc_stream_lock_s(stream_id);
+    *term = elc_stream_get_current_term(stream_id);
+    *role = elc_stream_get_role(stream_id);
+    elc_stream_unlock(stream_id);
+    LOG_DEBUG_INF("[ELC]get term and role ok. cur_term=%llu, role=%u.", *term, *role);
+    return CM_SUCCESS;
+}
+
+void elc_set_my_priority(uint32 stream_id, uint64 priority)
+{
+    elc_stream_lock_x(stream_id);
+    elc_stream_set_priority(stream_id, priority);
+    elc_stream_unlock(stream_id);
+    LOG_DEBUG_INF("[ELC]set my_priority=%llu ok.", priority);
+}
+
+status_t elc_reload_priority()
+{
+    if (!g_elc_init) {
+        LOG_RUN_INF("[ELC]election not initialized, no need to reload priority.");
+        return CM_SUCCESS;
+    }
+
+    uint32 stream_list[CM_MAX_STREAM_COUNT];
+    uint32 stream_count;
+    uint32 current_node_id = md_get_cur_node();
+    CM_RETURN_IFERR(md_get_stream_list(stream_list, &stream_count));
+    for (uint32 i = 0; i < stream_count; i++) {
+        uint32 stream_id = stream_list[i];
+        dcf_node_t node_info;
+        CM_RETURN_IFERR(md_get_stream_node_ext(stream_id, current_node_id, &node_info));
+        elc_set_my_priority(stream_id, node_info.priority);
+    }
+    return CM_SUCCESS;
+}
+
+uint64 elc_get_my_priority(uint32 stream_id)
+{
+    elc_stream_lock_s(stream_id);
+    uint64 priority = elc_stream_get_priority(stream_id);
+    elc_stream_unlock(stream_id);
+    return priority;
+}
+
+uint32 elc_get_my_group(uint32 stream_id)
+{
+    elc_stream_lock_s(stream_id);
+    uint32 group = elc_stream_get_my_group(stream_id);
+    elc_stream_unlock(stream_id);
+    return group;
+}
+
 status_t elc_update_node_role(uint32 stream_id)
 {
     dcf_node_t node_info;
@@ -343,6 +388,32 @@ status_t elc_update_node_role(uint32 stream_id)
     return CM_SUCCESS;
 }
 
+status_t elc_update_node_group(uint32 stream_id)
+{
+    dcf_node_t node_info;
+    CM_RETURN_IFERR(md_get_stream_node_ext(stream_id, md_get_cur_node(), &node_info));
+    uint32 group = node_info.group;
+
+    elc_stream_lock_x(stream_id);
+    elc_stream_set_my_group(stream_id, group);
+    elc_stream_unlock(stream_id);
+    LOG_RUN_INF("[ELC]update node group ok. new_group=%u.", group);
+    return CM_SUCCESS;
+}
+
+status_t elc_update_node_priority(uint32 stream_id)
+{
+    dcf_node_t node_info;
+    CM_RETURN_IFERR(md_get_stream_node_ext(stream_id, md_get_cur_node(), &node_info));
+    uint64 priority = node_info.priority;
+
+    elc_stream_lock_x(stream_id);
+    elc_stream_set_priority(stream_id, priority);
+    elc_stream_unlock(stream_id);
+    LOG_RUN_INF("[ELC]update node priority ok. new_priority=%llu.", priority);
+    return CM_SUCCESS;
+}
+
 uint32 elc_get_votefor(uint32 stream_id)
 {
     if (!g_elc_init) {
@@ -353,6 +424,18 @@ uint32 elc_get_votefor(uint32 stream_id)
     uint32 votefor = elc_stream_get_votefor(stream_id);
     elc_stream_unlock(stream_id);
     return votefor;
+}
+
+uint32 elc_get_old_leader(uint32 stream_id)
+{
+    if (!g_elc_init) {
+        LOG_RUN_ERR("[ELC]election module has not been initialized");
+        return CM_INVALID_NODE_ID;
+    }
+    elc_stream_lock_s(stream_id);
+    uint32 old_leader = elc_stream_get_old_leader(stream_id);
+    elc_stream_unlock(stream_id);
+    return old_leader;
 }
 
 status_t elc_demote_follower(uint32 stream_id)
@@ -431,8 +514,8 @@ bool32 elc_node_is_active(uint32 stream_id)
 {
     bool32 is_active = CM_TRUE;
     uint32 elc_timeout = elc_stream_get_elc_timeout_ms();
-    date_t last_hb = elc_stream_get_timeout(stream_id);
-    date_t now = g_timer()->now;
+    timespec_t last_hb = elc_stream_get_timeout(stream_id);
+    timespec_t now = cm_clock_now();
     if (((uint64)(now - last_hb)) / MICROSECS_PER_MILLISEC > elc_timeout) {
         is_active = CM_FALSE;
     }
@@ -445,18 +528,23 @@ status_t elc_node_is_healthy(uint32 stream_id, dcf_role_t* node_role, unsigned i
     elc_stream_lock_s(stream_id);
     dcf_role_t role = elc_stream_get_role(stream_id);
     if (role == DCF_ROLE_LEADER) {
-        *is_healthy = CM_TRUE;
-        if (elc_stream_get_run_mode() != ELECTION_AUTO) {
-            date_t now = g_timer()->now;
-            is_need_demote = elc_need_demote_follow(stream_id, now);
-            *is_healthy = (is_need_demote == CM_TRUE) ? CM_FALSE : CM_TRUE;
-        }
+        timespec_t now = cm_clock_now();
+        is_need_demote = elc_need_demote_follow(stream_id, now, CM_1X_FIXED);
+        *is_healthy = (is_need_demote == CM_TRUE) ? CM_FALSE : CM_TRUE;
     } else {
         *is_healthy = elc_node_is_active(stream_id);
     }
     *node_role = role;
     elc_stream_unlock(stream_id);
     return CM_SUCCESS;
+}
+
+status_t elc_node_voting_weight(uint32 stream_id, uint32 node_id, uint32* voting_weight)
+{
+    elc_stream_lock_s(stream_id);
+    status_t ret = elc_get_voting_weight(stream_id, node_id, voting_weight);
+    elc_stream_unlock(stream_id);
+    return ret;
 }
 
 #ifdef __cplusplus

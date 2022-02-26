@@ -555,7 +555,7 @@ void cm_now_detail(date_detail_t *detail)
 static inline int32 days_before_year(int32 year)
 {
     --year;
-    return year * 365 + year / 4 - year / 100 + year / 400;
+    return (((year * 365) + (year / 4)) - (year / 100)) + (year / 400);
 }
 
 static inline int32 total_days_before_date(const date_detail_t *detail)
@@ -743,7 +743,7 @@ static inline status_t cm_append_date_text(const date_detail_t *detail, const da
     return CM_SUCCESS;
 }
 
-static status_t cm_detail2text(date_detail_t *detail, text_t *fmt, uint32 precision, text_t *text,
+static status_t cm_detail2text(const date_detail_t *detail, text_t *fmt, uint32 precision, text_t *text,
                                uint32 max_len)
 {
     date_detail_ex_t detail_ex;
@@ -869,7 +869,7 @@ void cm_decode_date(date_t date, date_detail_t *detail)
     }
 }
 
-status_t cm_date2text_ex(date_t date, text_t *fmt, uint32 precision, text_t *text, uint32 max_len)
+status_t cm_date2text_ex(date_t date, const text_t *fmt, uint32 precision, text_t *text, uint32 max_len)
 {
     date_detail_t detail;
     text_t format_text;
