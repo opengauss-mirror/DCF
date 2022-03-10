@@ -8,16 +8,8 @@
 ##### 3、目录说明：
 -   DCF：主目录，CMakeLists.txt为主工程入口；
 -   src:：源代码目录，按子目录划分模块解耦；
--   platform：公司三方库（如安全函数库）
--   open_source：第三方开源库
 -   test：测试用例
-    1. test/UT：单元测试使用gtest框架
-    2. test/consistency：一致性测试jepsen框架
-    3. test/test_perf：性能测试
-
--   build：存放其他工程构建脚本（如用cmake工具生成的windows vc工程）、CI脚本等
--   .cloudbuild：云龙流水线对接脚本
--   doc：设计文档
+-   build：工程构建脚本
 
 #### 二、编译指导与工程构建
 ##### 概述
@@ -384,7 +376,7 @@ ___int int dcf_set_work_mode(unsigned int stream_id, dcf_work_mode_t work_mode, 
 
 ```c{.line-num}
 
-参见：https://code.huawei.com/DDES/DCF/tree/master/test/test_main
+参见：DCF/test/test_main目录
 
 ```
 
@@ -393,3 +385,7 @@ ___int int dcf_set_work_mode(unsigned int stream_id, dcf_work_mode_t work_mode, 
 ##### 2、执行测试用例
 
 待续...
+
+#### 五、应用实例
+##### 1、GaussDB(for openGauss)使能paxos特性实践
+具体可参考：https://gitee.com/opengauss/blog/blob/master/content/zh/post/yanghaiyan/openGauss%E4%BD%BF%E8%83%BDpaxos%E7%89%B9%E6%80%A7%E5%AE%9E%E8%B7%B5.md
