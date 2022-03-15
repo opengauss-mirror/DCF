@@ -225,17 +225,19 @@ status_t mec_process_message(const mec_pipe_t *pipe, mec_message_t *msg)
 {
     dtc_msgqueue_t *my_queue = NULL;
     mq_context_t *mq_ctx = get_recv_mq_ctx();
-    if (md_check_stream_node_exist(msg->head->stream_id, msg->head->src_inst) != CM_SUCCESS) {
-        LOG_DEBUG_ERR("[MEC]firsthead: invalid stream_id %u or src_inst %u", msg->head->stream_id, msg->head->src_inst);
+    uint32 cur_node = md_get_cur_node();
+    uint32 src_inst = msg->head->src_inst;
+    if (md_check_stream_node_exist(msg->head->stream_id, src_inst) != CM_SUCCESS || src_inst == cur_node) {
+        LOG_DEBUG_ERR("[MEC]firsthead: invalid stream_id %u or src_inst %u, cur=%u",
+            msg->head->stream_id, src_inst, cur_node);
         return CM_ERROR;
     }
 
-    if (SECUREC_UNLIKELY(msg->head->dst_inst != md_get_cur_node())) {
+    if (SECUREC_UNLIKELY(msg->head->dst_inst != cur_node)) {
         LOG_DEBUG_ERR("[MEC]firsthead: dst_inst %u is not me.", msg->head->dst_inst);
         return CM_ERROR;
     }
     uint32 channel_id = MEC_STREAM_TO_CHANNEL_ID(msg->head->stream_id, get_mec_profile()->channel_num);
-    uint32 src_inst = msg->head->src_inst;
     my_queue = &mq_ctx->channel_private_queue[src_inst][channel_id];
     dtc_msgitem_t *msgitem = mec_alloc_msgitem(mq_ctx, my_queue);
     if (msgitem == NULL) {
@@ -840,16 +842,18 @@ static status_t mec_init_pipe(cs_pipe_t *pipe)
     return CM_SUCCESS;
 }
 
-static status_t check_if_head_info_valid(mec_message_head_t *head)
+static status_t check_if_head_info_valid(const mec_message_head_t *head)
 {
     mec_context_t *mec_ctx = get_mec_ctx();
+    uint32 cur_node = md_get_cur_node();
 
     if (head->cmd != (uint8)MEC_CMD_CONNECT) {
         LOG_RUN_ERR("[MEC]cmd %u invalid when building connection.", head->cmd);
         return CM_ERROR;
     }
-    if (head->stream_id >= get_mec_profile()->channel_num || head->src_inst >= CM_MAX_NODE_COUNT) {
-        LOG_DEBUG_ERR("[MEC]invalid stream_id %u or src_inst %u", head->stream_id, head->src_inst);
+    if (head->stream_id >= get_mec_profile()->channel_num || head->src_inst >= CM_MAX_NODE_COUNT
+        || head->src_inst == CM_INVALID_NODE_ID || head->src_inst == cur_node) {
+        LOG_DEBUG_ERR("[MEC]invalid channel %u or src_inst %u, cur=%u", head->stream_id, head->src_inst, cur_node);
         return CM_ERROR;
     }
     if (mec_ctx->channels[head->src_inst] == NULL) {

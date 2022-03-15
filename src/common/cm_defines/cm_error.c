@@ -202,7 +202,7 @@ void cm_set_error_ex(const char *file, uint32 line, cm_errno_t code, const char 
     va_end(args);
 }
 
-char *cm_get_t2s_addr()
+char *cm_get_t2s_addr(void)
 {
     return g_tls_error.t2s_buf1;
 }

@@ -590,7 +590,7 @@ status_t init_stream(uint32 stream_id, char *data_path, stream_t *stream)
     CM_RETURN_IFERR(stream_alloc_entry_cache(&stream->entry_cache));
 
     PRTS_RETURN_IFERR(snprintf_s(stream->home, CM_MAX_PATH_LEN,
-        CM_MAX_PATH_LEN - 1, "%s/stream%02d", data_path, stream_id));
+        CM_MAX_PATH_LEN - 1, "%s/stream%02u", data_path, stream_id));
 
     stream->id            = stream_id;
     stream->first_index   = 1;

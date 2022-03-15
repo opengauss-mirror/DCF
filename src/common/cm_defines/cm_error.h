@@ -159,7 +159,7 @@ void cm_set_error_ex(const char *file, uint32 line, cm_errno_t code, const char 
 extern const char *g_error_desc[];
 
 /* convert text to string, using local thread buffer */
-char *cm_get_t2s_addr();
+char *cm_get_t2s_addr(void);
 char *cm_t2s(const char *buf, uint32 len);
 char *cm_concat_t2s(const char *buf1, uint32 len1, const char *buf2, uint32 len2, char c_mid);
 char *cm_t2s_ex(const char *buf, uint32 len);

@@ -89,7 +89,7 @@ const char *dcf_error_desc[CM_ERROR_COUNT] = {
     [ERR_QUERY_DCF_INFO_ERR]      = "Failed to query dcf info, %s, errno=%d",
 };
 
-void init_dcf_errno_desc()
+void init_dcf_errno_desc(void)
 {
     for (int i = DCF_ERRNO_NETWORK_BEGIN; i < DCF_ERRNO_NETWORK_END; i++) {
         cm_register_error(i, dcf_error_desc[i]);
