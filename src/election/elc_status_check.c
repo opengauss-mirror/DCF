@@ -128,7 +128,7 @@ uint32 elc_get_rcv_best_priority_node(uint32 stream_id)
             status_check->info[id].role == DCF_ROLE_LOGGER || status_check->info[id].role == DCF_ROLE_PASSIVE) {
             continue;
         }
-        LOG_DEBUG_INF("[ELC]best_prio:node=%u,role=%u,group=%u,prio=%llu,in_major=%u,is_future_hb=%u,last_recv=%llu",
+        LOG_RUN_INF("[ELC]best_prio:node=%u,role=%u,group=%u,prio=%llu,in_major=%u,is_future_hb=%u,last_recv=%llu",
             id, status_check->info[id].role, status_check->info[id].group, status_check->info[id].priority,
             status_check->info[id].is_in_majority, status_check->info[id].is_future_hb,
             status_check->info[id].last_recv_time);
@@ -149,7 +149,7 @@ uint32 elc_get_rcv_best_priority_node(uint32 stream_id)
     }
     elc_status_check_unlock(stream_id);
 
-    LOG_DEBUG_INF("[ELC]best_prio:cur_node=%u,leader_group=%u,best_group=%u,best_prio=%llu,rcv_best_priority_node=%u",
+    LOG_RUN_INF("[ELC]best_prio:cur_node=%u,leader_group=%u,best_group=%u,best_prio=%llu,rcv_best_priority_node=%u",
         cur_node, leader_group, best_group, best_prio, ret);
     return ret;
 }

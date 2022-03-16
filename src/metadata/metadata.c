@@ -343,7 +343,7 @@ status_t md_init(uint32 node_id, const char* cfg_str)
     return CM_SUCCESS;
 }
 
-void frem_streams(dcf_streams_t* streams)
+void free_streams(dcf_streams_t* streams)
 {
     if (streams == NULL) {
         return;
@@ -377,7 +377,7 @@ void md_uninit()
         CM_FREE_PTR(g_metadata.all_nodes[i]);
     }
 
-    frem_streams(g_metadata.streams);
+    free_streams(g_metadata.streams);
     g_metadata.streams = NULL;
     CM_FREE_PTR(g_metadata.buffer);
     g_metadata.status = META_UNINIT;
@@ -682,7 +682,7 @@ status_t md_save(const char* cfg_str, uint32 size)
     CM_RETURN_IFERR_EX(parse_streams_cfg(streams, cfg_str), cm_unlatch(&g_metadata.latch, NULL));
     CM_RETURN_IFERR_EX(reset_node_list(g_metadata.all_nodes, streams), cm_unlatch(&g_metadata.latch, NULL));
 
-    frem_streams(g_metadata.streams);
+    free_streams(g_metadata.streams);
     g_metadata.streams = streams;
     cm_unlatch(&g_metadata.latch, NULL);
     return CM_SUCCESS;

@@ -292,7 +292,7 @@ void elc_stream_notify_proc()
                 uint32 prio_leader = elc_get_rcv_best_priority_node(stream_id);
                 bool32 force_vote = elc_stream_is_force_vote(stream_id);
                 elc_stream_set_force_vote_flag(stream_id, CM_FALSE);
-                LOG_DEBUG_INF("[ELC]max_prio_leader=%u force_vote=%d role=%d", prio_leader, force_vote, role);
+                LOG_RUN_INF("[ELC]max_prio_leader=%u force_vote=%d role=%d", prio_leader, force_vote, role);
                 if (force_vote == CM_FALSE && role == DCF_ROLE_LEADER && prio_leader != CM_INVALID_NODE_ID) {
                     rep_try_promote_prio_leader(stream_id, prio_leader);
                     if (elc_stream_get_role(stream_id) != DCF_ROLE_LEADER) {

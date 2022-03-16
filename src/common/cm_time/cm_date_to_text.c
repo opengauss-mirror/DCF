@@ -296,7 +296,7 @@ errno_t cm_fmt_tz_minute(const append_date_text_para_t* para, append_date_text_r
 {
     int32 tz_minute;
     tz_minute = TIMEZONE_GET_MINUTE(para->detail->tz_offset);
-    PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1, "%02u",
+    PRTS_RETURN_IFERR(snprintf_s(res->item_str, FORMAT_ITEM_BUFFER_SIZE, FORMAT_ITEM_BUFFER_SIZE - 1, "%02d",
                                  tz_minute));
     return CM_SUCCESS;
 }

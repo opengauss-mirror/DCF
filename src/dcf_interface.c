@@ -995,8 +995,6 @@ static status_t append_local_node(unsigned int stream_id, cJSON *obj)
 
     bool32 is_in_major = elc_is_in_majority(stream_id);
     CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "is_in_major", is_in_major));
-    uint32 best_prio_node = elc_get_rcv_best_priority_node(stream_id);
-    CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "best_prio_node", best_prio_node));
 
     uint64 index = stg_get_applied_index(stream_id);
     CM_CHECK_CJSON_OPER_ERR_AND_RETURN(cJSON_AddNumberToObject(obj, "applied_index", index));

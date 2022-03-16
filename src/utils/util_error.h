@@ -113,7 +113,7 @@ typedef enum en_dcf_errno {
     ERR_DCF_CEIL = CM_ERROR_COUNT,
 }dcf_errno_t;
 
-void init_dcf_errno_desc();
+void init_dcf_errno_desc(void);
 
 #ifdef __cplusplus
 }
