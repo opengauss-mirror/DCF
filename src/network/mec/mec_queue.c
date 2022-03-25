@@ -1152,24 +1152,24 @@ int64 mec_get_mem_capacity(mq_context_t *mq_ctx, msg_priv_t priv)
 status_t mec_private_pool_init(message_pool_t **private_pool, uint32 buf_size, uint32 private_msg_pool_extent)
 {
     size_t ctrl_size = sizeof(message_pool_t);
-    *private_pool = (message_pool_t *)malloc(ctrl_size);
-    if (*private_pool == NULL) {
+    message_pool_t *cur_pool = (message_pool_t *)malloc(ctrl_size);
+    if (cur_pool == NULL) {
         LOG_RUN_ERR("[MEC]malloc private_pool ctrl failed.");
         return CM_ERROR;
     }
-    errno_t err = memset_s(*private_pool, ctrl_size, 0, ctrl_size);
+    errno_t err = memset_s(cur_pool, ctrl_size, 0, ctrl_size);
     if (err != EOK) {
-        CM_FREE_PTR(*private_pool);
+        CM_FREE_PTR(cur_pool);
         LOG_RUN_ERR("[MEC]memset private_pool ctrl failed.");
         return CM_ERROR;
     }
-    if (mec_init_message_pool(*private_pool, buf_size) != CM_SUCCESS) {
-        CM_FREE_PTR(*private_pool);
+    if (mec_init_message_pool(cur_pool, buf_size) != CM_SUCCESS) {
+        CM_FREE_PTR(cur_pool);
         LOG_RUN_ERR("[MEC]init private_pool ctrl failed.");
         return CM_ERROR;
     }
 
-    (*private_pool)->msg_pool_extent = private_msg_pool_extent;
+    (cur_pool)->msg_pool_extent = private_msg_pool_extent;
     return CM_SUCCESS;
 }
 
