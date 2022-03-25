@@ -21,7 +21,6 @@
  *
  * -------------------------------------------------------------------------
  */
-
 #include "interface/dcf_interface.h"
 #include "cm_defs.h"
 #include "util_error.h"
