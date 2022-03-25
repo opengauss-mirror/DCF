@@ -696,7 +696,8 @@ status_t elc_status_check_ack_proc(mec_message_t *pack)
             return CM_ERROR;
         }
         LOG_DEBUG_INF("[ELC]Check metadata as mismatched, leader prepare to rep metadata:%s", md_get_buffer());
-        if (rep_write(stream_id, md_get_buffer(), size, OP_FLAG_ALL, ENTRY_TYPE_CONF, NULL) != CM_SUCCESS) {
+        if (rep_write(stream_id, md_get_buffer(), size, CFG_LOG_KEY(src_node_id, OP_FLAG_ALL),
+            ENTRY_TYPE_CONF, NULL) != CM_SUCCESS) {
             CM_RETURN_IFERR(md_set_status(META_NORMAL));
             return CM_ERROR;
         }
