@@ -1170,6 +1170,7 @@ status_t mec_private_pool_init(message_pool_t **private_pool, uint32 buf_size, u
     }
 
     (cur_pool)->msg_pool_extent = private_msg_pool_extent;
+    *private_pool = cur_pool;
     return CM_SUCCESS;
 }
 
