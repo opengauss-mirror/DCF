@@ -25,7 +25,6 @@
 #include "elc_msg_pack.h"
 #include "elc_status_check.h"
 
-
 #ifdef __cplusplus
 extern "C" {
 #endif
