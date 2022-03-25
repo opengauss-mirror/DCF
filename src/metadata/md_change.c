@@ -32,7 +32,15 @@ extern "C" {
 int md_consensus_notify_cb(uint32 stream_id, uint64 index, const char *buf, uint32 size, uint64 key)
 {
     status_t ret = CM_SUCCESS;
-
+    uint32 node = CFG_LOG_NODE(key);
+    uint32 src = md_get_cur_node();
+ 
+    LOG_RUN_INF("[META]md_consensus_notify. node=%u, src=%u, key=0x%llx.", node, src, key);
+    if (node != CM_NODE_ID_ALL && node != src) {
+        CM_RETURN_IFERR(md_set_status(META_NORMAL));
+        return CM_SUCCESS;
+    }
+    
     if (NEED_ADD(key) || NEED_REMOVE(key)) {
         ret = mec_update_profile_inst();
         if (ret != CM_SUCCESS) {
