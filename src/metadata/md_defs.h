@@ -44,6 +44,8 @@ extern "C" {
 #define CM_MAX_MSG_TIMEOUT 600000   // 10min
 
 #define CM_INVALID_NODE_ID   0
+#define CM_NODE_ID_ALL       0xFFFFFFFF
+
 #define CM_INVALID_STREAM_ID 0
 #define CM_INVALID_TERM_ID   0
 #define CM_INVALID_INDEX_ID  0
@@ -89,7 +91,8 @@ extern "C" {
 #define OP_FLAG_CHANGE_PRIORITY      0x0010  // change member priority
 #define OP_FLAG_ALL   ((OP_FLAG_ADD) | (OP_FLAG_REMOVE) | (OP_FLAG_CHANGE_ROLE) | \
                             (OP_FLAG_CHANGE_GROUP) | (OP_FLAG_CHANGE_PRIORITY))
-
+#define CFG_LOG_KEY(node, flag) (((uint64)(node) << 32) | (flag))
+#define CFG_LOG_NODE(key) (uint32)(((key) >> 32))
 #define NEED_ADD(flag) ((flag) & OP_FLAG_ADD)
 #define NEED_REMOVE(flag) ((flag) & OP_FLAG_REMOVE)
 #define NEED_CHANGE_ROLE(flag) ((flag) & OP_FLAG_CHANGE_ROLE)

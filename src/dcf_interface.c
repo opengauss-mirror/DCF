@@ -1305,7 +1305,8 @@ status_t add_member_request(unsigned int stream_id, unsigned int node_id, const 
         return CM_ERROR;
     }
     CM_RETURN_IFERR_EX(md_to_string(md_buf, CM_METADATA_DEF_MAX_LEN, &size), CM_FREE_PTR(md_buf));
-    CM_RETURN_IFERR_EX(rep_write(stream_id, md_buf, size, OP_FLAG_ADD, ENTRY_TYPE_CONF, NULL), CM_FREE_PTR(md_buf));
+    CM_RETURN_IFERR_EX(rep_write(stream_id, md_buf, size, CFG_LOG_KEY(CM_NODE_ID_ALL, OP_FLAG_ADD),
+        ENTRY_TYPE_CONF, NULL), CM_FREE_PTR(md_buf));
     CM_FREE_PTR(md_buf);
     return CM_SUCCESS;
 }
@@ -1371,7 +1372,8 @@ status_t remove_member_request(unsigned int stream_id, unsigned int node_id)
         return CM_ERROR;
     }
     CM_RETURN_IFERR_EX(md_to_string(md_buf, CM_METADATA_DEF_MAX_LEN, &size), CM_FREE_PTR(md_buf));
-    CM_RETURN_IFERR_EX(rep_write(stream_id, md_buf, size, OP_FLAG_REMOVE, ENTRY_TYPE_CONF, NULL), CM_FREE_PTR(md_buf));
+    CM_RETURN_IFERR_EX(rep_write(stream_id, md_buf, size, CFG_LOG_KEY(CM_NODE_ID_ALL, OP_FLAG_REMOVE),
+        ENTRY_TYPE_CONF, NULL), CM_FREE_PTR(md_buf));
     CM_FREE_PTR(md_buf);
     return CM_SUCCESS;
 }
@@ -1406,7 +1408,7 @@ status_t change_member_request(uint32 stream_id, uint32 node_id, dcf_change_memb
         return CM_ERROR;
     }
     CM_RETURN_IFERR_EX(md_to_string(md_buf, CM_METADATA_DEF_MAX_LEN, &size), CM_FREE_PTR(md_buf));
-    CM_RETURN_IFERR_EX(rep_write(stream_id, md_buf, size, change_info->op_type,
+    CM_RETURN_IFERR_EX(rep_write(stream_id, md_buf, size, CFG_LOG_KEY(node_id, change_info->op_type),
         ENTRY_TYPE_CONF, NULL), CM_FREE_PTR(md_buf));
     CM_FREE_PTR(md_buf);
     return CM_SUCCESS;

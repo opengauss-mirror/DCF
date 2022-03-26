@@ -282,7 +282,8 @@ status_t rep_leader_reset(uint32 stream_id)
             CM_RETURN_IFERR(md_set_status(META_NORMAL));
             return CM_ERROR;
         }
-        if (rep_write(stream_id, md_buf, size, OP_FLAG_ALL, ENTRY_TYPE_CONF, NULL) != CM_SUCCESS) {
+        if (rep_write(stream_id, md_buf, size, CFG_LOG_KEY(CM_INVALID_NODE_ID, OP_FLAG_NONE),
+            ENTRY_TYPE_CONF, NULL) != CM_SUCCESS) {
             CM_FREE_PTR(md_buf);
             CM_RETURN_IFERR(md_set_status(META_NORMAL));
             return CM_ERROR;
