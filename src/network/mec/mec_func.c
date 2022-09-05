@@ -103,12 +103,12 @@ status_t mec_alloc_msg_item(message_pool_t *pool, msg_item_t **item)
         }
         if (pool->extending) {
             cm_spin_unlock(&pool->lock);
-            cm_sleep(1);
+            cm_sleep(CM_SLEEP_1_FIXED);
             continue;
         }
         pool->extending = CM_TRUE;
         cm_spin_unlock(&pool->lock);
-        if (pool->capacity == MSG_POOL_MAX_EXTENTS * pool->msg_pool_extent) {
+        if (pool->capacity >= MSG_POOL_MAX_EXTENTS * pool->msg_pool_extent) {
             pool->extending = CM_FALSE;
             return CM_SUCCESS;
         }
@@ -123,7 +123,9 @@ status_t mec_alloc_msg_item(message_pool_t *pool, msg_item_t **item)
         ++pool->ext_cnt;
         CM_MFENCE;
         pool->extending = CM_FALSE;
-        }
+        LOG_DEBUG_INF("[MEC]alloc message item with pool extend, alloc_size:%zu ext_cnt:%u msg_pool_extent:%u "
+            "capacity:%u", alloc_size, pool->ext_cnt, pool->msg_pool_extent, pool->capacity);
+    }
     return CM_SUCCESS;
 }
 
@@ -178,67 +180,110 @@ status_t mec_get_message_buf(mec_message_t *pack, uint32 dst_inst, msg_priv_t pr
     return CM_SUCCESS;
 }
 
-static inline void set_time1(mec_message_head_t *head)
+static inline status_t set_time1(mec_message_head_t *head)
 {
     uint32 temp_size = 0;
     mec_message_head_t *temp = head;
     date_t time1 = g_timer()->now;
     if (CS_BATCH(head->flags)) {
         temp++;
-        uint32 total_size = head->size - sizeof(mec_message_head_t);
-        while (total_size > 0) {
+        uint32 remain_size = (uint32)(head->size - sizeof(mec_message_head_t));
+        while (remain_size > 0) {
             temp_size = temp->size;
+            if (remain_size < temp_size || remain_size < (uint32)sizeof(mec_message_head_t)) {
+                LOG_DEBUG_ERR("[MEC]batch_err: head_size %u, remain %u, cur_size %u.",
+                    head->size, remain_size, temp_size);
+                return CM_ERROR;
+            }
             temp->time1 = time1;
-            total_size -= temp_size;
+            remain_size -= temp_size;
             temp = (mec_message_head_t *)((char *)temp + temp_size);
         }
     } else {
         temp->time1 = time1;
     }
+
+    return CM_SUCCESS;
 }
 
-static status_t mec_read_message(cs_pipe_t *pipe, mec_message_t *msg)
+static status_t check_recv_head_info(const mec_message_t *msg, msg_priv_t pipe_priv)
+{
+    mec_context_t *mec_ctx = get_mec_ctx();
+    uint32 cur_node = md_get_cur_node();
+    mec_message_head_t *head = msg->head;
+
+    if (md_check_stream_node_exist(head->stream_id, head->src_inst) != CM_SUCCESS
+        || head->src_inst == cur_node || head->dst_inst != cur_node) {
+        LOG_DEBUG_ERR("[MEC]rcvhead: invalid stream_id %u or src_inst %u or dst_inst %u, cur=%u",
+            head->stream_id, head->src_inst, head->dst_inst, cur_node);
+        return CM_ERROR;
+    }
+
+    if (SECUREC_UNLIKELY(head->cmd >= MEC_CMD_CEIL)) {
+        LOG_DEBUG_ERR("[MEC]rcvhead:invalid msg command %u", head->cmd);
+        return CM_ERROR;
+    }
+    if (SECUREC_UNLIKELY(mec_ctx->cb_processer[head->cmd].proc == NULL)) {
+        LOG_DEBUG_ERR("[MEC]rcvhead:no message handling function registered for message type %u", head->cmd);
+        return CM_ERROR;
+    }
+
+    msg_priv_t flag_priv = CS_PRIV_LOW(head->flags) ? PRIV_LOW : PRIV_HIGH;
+    msg_priv_t cmd_priv = mec_ctx->cb_processer[head->cmd].priv;
+    if (flag_priv != pipe_priv || cmd_priv != pipe_priv) {
+        LOG_DEBUG_ERR("[MEC]rcvhead:flag_priv %u or cmd_priv %u not equal with pipe_priv %u, cmd %u",
+            flag_priv, cmd_priv, pipe_priv, head->cmd);
+        return CM_ERROR;
+    }
+
+    if (get_mec_profile()->algorithm == COMPRESS_NONE && CS_COMPRESS(head->flags)) {
+        LOG_DEBUG_ERR("[MEC]rcvhead:compress is not enable, but recv compress pkt. head_flags=%u", head->flags);
+        return CM_ERROR;
+    }
+
+    if (CS_MORE_DATA(head->flags) && CS_END_DATA(head->flags)) {
+        LOG_DEBUG_ERR("[MEC]rcvhead:more or end flag error. head_flags=%u", head->flags);
+        return CM_ERROR;
+    }
+
+    if ((CS_BATCH(head->flags) && head->batch_size <= 1) || (head->batch_size == 0)
+        || (head->batch_size > get_mec_profile()->batch_size)) {
+        LOG_DEBUG_ERR("[MEC]rcvhead:batch_flag 0x%x or batch_size %u exceed error, prof_batch %u.",
+            head->flags, head->batch_size, get_mec_profile()->batch_size);
+        return CM_ERROR;
+    }
+
+    if (head->size < sizeof(mec_message_head_t) || head->size > msg->aclt_size) {
+        LOG_DEBUG_ERR("[MEC]rcvhead:recv message length %u exceed min or max %u", head->size, msg->aclt_size);
+        return CM_ERROR;
+    }
+    return CM_SUCCESS;
+}
+
+static status_t mec_read_message(cs_pipe_t *pipe, mec_message_t *msg, msg_priv_t pipe_priv)
 {
     char *buf = NULL;
 
     if (cs_read_fixed_size(pipe, msg->buffer, sizeof(mec_message_head_t)) != CM_SUCCESS) {
         return CM_ERROR;
     }
-
-    if (SECUREC_UNLIKELY(msg->head->size > msg->aclt_size)) {
-        LOG_DEBUG_ERR("recv message length %u exceed max %u", msg->head->size, msg->aclt_size);
-        return CM_ERROR;
-    }
+    CM_RETURN_IFERR(check_recv_head_info(msg, pipe_priv));
 
     buf = msg->buffer + sizeof(mec_message_head_t);
     if (cs_read_fixed_size(pipe, buf, msg->head->size - sizeof(mec_message_head_t)) != CM_SUCCESS) {
         return CM_ERROR;
     }
 
-    set_time1(msg->head);
-
-    return CM_SUCCESS;
+    return set_time1(msg->head);
 }
-
 
 status_t mec_process_message(const mec_pipe_t *pipe, mec_message_t *msg)
 {
     dtc_msgqueue_t *my_queue = NULL;
     mq_context_t *mq_ctx = get_recv_mq_ctx();
-    uint32 cur_node = md_get_cur_node();
-    uint32 src_inst = msg->head->src_inst;
-    if (md_check_stream_node_exist(msg->head->stream_id, src_inst) != CM_SUCCESS || src_inst == cur_node) {
-        LOG_DEBUG_ERR("[MEC]firsthead: invalid stream_id %u or src_inst %u, cur=%u",
-            msg->head->stream_id, src_inst, cur_node);
-        return CM_ERROR;
-    }
 
-    if (SECUREC_UNLIKELY(msg->head->dst_inst != cur_node)) {
-        LOG_DEBUG_ERR("[MEC]firsthead: dst_inst %u is not me.", msg->head->dst_inst);
-        return CM_ERROR;
-    }
     uint32 channel_id = MEC_STREAM_TO_CHANNEL_ID(msg->head->stream_id, get_mec_profile()->channel_num);
-    my_queue = &mq_ctx->channel_private_queue[src_inst][channel_id];
+    my_queue = &mq_ctx->channel_private_queue[msg->head->src_inst][channel_id];
     dtc_msgitem_t *msgitem = mec_alloc_msgitem(mq_ctx, my_queue);
     if (msgitem == NULL) {
         LOG_DEBUG_ERR("[MEC]alloc message item failed, error code %d.", cm_get_os_error());
@@ -247,7 +292,7 @@ status_t mec_process_message(const mec_pipe_t *pipe, mec_message_t *msg)
     msgitem->msg = msg->buffer;
     uint32 index = 0;
     if (pipe->priv == PRIV_LOW) {
-        index = cm_hash_uint32((src_inst & 0xFFFFFF) | (channel_id << 24), DTC_MSG_QUEUE_NUM) + 1;
+        index = 1; // avoid concurrent attacks without affecting performance.
     }
     CM_MFENCE;
     put_msgitem(&mq_ctx->queue[index], msgitem);
@@ -285,7 +330,7 @@ status_t mec_discard_recv_msg(mec_pipe_t *pipe)
         return CM_ERROR;
     }
     MEC_MESSAGE_ATTACH(&pack, get_mec_profile(), pipe->priv, msg_buf);
-    if (mec_read_message(&pipe->recv_pipe, &pack) != CM_SUCCESS) {
+    if (mec_read_message(&pipe->recv_pipe, &pack, pipe->priv) != CM_SUCCESS) {
         gfree(msg_buf);
         return CM_ERROR;
     }
@@ -332,21 +377,12 @@ status_t mec_proc_recv_msg(mec_pipe_t *pipe)
     }
     MEC_MESSAGE_ATTACH(&pack, get_mec_profile(), pipe->priv, item->buffer);
     cm_reset_error();
-    if (mec_read_message(&pipe->recv_pipe, &pack) != CM_SUCCESS) {
+    if (mec_read_message(&pipe->recv_pipe, &pack, pipe->priv) != CM_SUCCESS) {
         LOG_DEBUG_ERR("[MEC]mec_read_message failed. channel %d, priv %d", pipe->channel->id, pipe->priv);
         mec_release_pack(&pack);
         return CM_ERROR;
     }
 
-    if (mq_ctx->profile->algorithm == COMPRESS_NONE && CS_COMPRESS(pack.head->flags)) {
-        LOG_DEBUG_WAR("[MEC]server is not enable compress, discard the message. msg len[%u],src inst[%d], "
-                      "dst inst[%d], cmd[%u], flag[%u], stream id[%u], serial no[%u], batch size[%u], frag no[%u].",
-                      pack.head->size, pack.head->src_inst, pack.head->dst_inst, pack.head->cmd,
-                      pack.head->flags, pack.head->stream_id, pack.head->serial_no, pack.head->batch_size,
-                      pack.head->frag_no);
-        mec_release_pack(&pack);
-        return CM_SUCCESS;
-    }
     if (mec_process_message(pipe, &pack) != CM_SUCCESS) {
         mec_release_pack(&pack);
         return CM_ERROR;
@@ -375,7 +411,7 @@ void mec_proc_recv_pipe(struct st_mec_pipe *pipe, bool32 *is_continue)
 
     if (cm_atomic32_cas(&pipe->recv_need_close, CM_TRUE, CM_FALSE) == CM_TRUE
         || get_mec_ctx()->phase != SHUTDOWN_PHASE_NOT_BEGIN) {
-        LOG_DEBUG_WAR("[MEC]mec recv need close or phase(%d) not begin, "
+        LOG_DEBUG_ERR("[MEC]mec recv need close or phase(%d) not begin, "
                       "disconnect recv channel %d, priv %d",
                       get_mec_ctx()->phase, pipe->channel->id, pipe->priv);
         reactor_unregister_pipe(pipe);
@@ -818,7 +854,7 @@ static status_t mec_init_pipe(cs_pipe_t *pipe)
     uint32 proto_code = 0;
     int32 size;
     pipe->connect_timeout = get_mec_profile()->connect_timeout;
-    pipe->socket_timeout = get_mec_profile()->socket_timeout;;
+    pipe->socket_timeout = get_mec_profile()->socket_timeout;
     if (cs_read_bytes(pipe, (char *)&proto_code, sizeof(proto_code), &size) != CM_SUCCESS) {
         cs_disconnect(pipe);
         LOG_RUN_ERR("[MEC]cs_read_bytes failed.");
@@ -842,7 +878,7 @@ static status_t mec_init_pipe(cs_pipe_t *pipe)
     return CM_SUCCESS;
 }
 
-static status_t check_if_head_info_valid(const mec_message_head_t *head)
+static status_t check_connect_head_info(const mec_message_head_t *head)
 {
     mec_context_t *mec_ctx = get_mec_ctx();
     uint32 cur_node = md_get_cur_node();
@@ -892,7 +928,7 @@ static status_t mec_accept(cs_pipe_t *pipe)
         return CM_ERROR;
     }
 
-    CM_RETURN_IFERR(check_if_head_info_valid(&head));
+    CM_RETURN_IFERR(check_connect_head_info(&head));
 
     channel = &mec_ctx->channels[head.src_inst][head.stream_id];
     msg_priv_t priv = CS_PRIV_LOW(head.flags) ? PRIV_LOW : PRIV_HIGH;
@@ -902,7 +938,8 @@ static status_t mec_accept(cs_pipe_t *pipe)
         cm_sleep(CM_SLEEP_10_FIXED);
         count++;
         if (count > CM_100X_FIXED) {
-            LOG_RUN_ERR("[MEC]wait old pipe detach failed.stream_id %u src_inst %u", head.stream_id, head.src_inst);
+            LOG_RUN_ERR("[MEC]wait old pipe clean failed,force clean.stream %u,src %u,priv %u,reg %u",
+                head.stream_id, head.src_inst, priv, mec_pipe->is_reg);
             return CM_ERROR;
         }
     }
@@ -913,7 +950,6 @@ static status_t mec_accept(cs_pipe_t *pipe)
     cm_thread_unlock(&mec_pipe->recv_lock);
     CM_MFENCE;
 
-    CM_ASSERT(!mec_pipe->is_reg);
     if (reactor_register_pipe(mec_pipe, get_mec_reactor(priv)) != CM_SUCCESS) {
         LOG_RUN_ERR("[MEC]register channel %u priv %u to reactor failed.", channel->id, priv);
         return CM_ERROR;
@@ -1190,7 +1226,7 @@ static void proc_fragment_timeout()
             char date[CM_MAX_TIME_STRLEN] = {0};
             mec_message_head_t *head = (mec_message_head_t *)ctrl->buffer;
             (void)cm_date2str(ctrl->now, "yyyy-mm-dd hh24:mi:ss.ff3", date, CM_MAX_TIME_STRLEN);
-            LOG_RUN_ERR("[MEC]receive fragment over time, message src inst[%d], "
+            LOG_RUN_WAR("[MEC]receive fragment over time, message src inst[%d], "
                         "dst inst[%d], cmd[%u], stream id[%u], serial no[%u], batch size[%u], last hit %s.",
                         head->src_inst,
                         head->dst_inst,

@@ -64,6 +64,8 @@ extern "C" {
 #define MEC_MAX_MESSAGE_BUFFER_SIZE      (10 * 1024)
 #define MEC_MIN_MESSAGE_BUFFER_SIZE      (32)
 
+#define MAX_MAJORITY_GROUPS_STR_LEN  (1024)
+
 typedef enum en_compress_algorithm {
     COMPRESS_NONE = 0,
     COMPRESS_ZSTD = 1,

@@ -33,6 +33,8 @@
 #include "cm_timer.h"
 #include "util_perf_stat.h"
 #include "rep_monitor.h"
+#include "cm_num.h"
+#include "cm_text.h"
 
 #define APPEND_NORMAL_MODE 0
 #define APPEND_REMATCH_MODE 1
@@ -404,9 +406,9 @@ static status_t rep_appendlog_node(uint32 stream_id, uint32 node_id, dcf_role_t 
         status_t ret = rep_encode_one_log(&pack, log_count_pos, j + 1, entry);
         stg_entry_dec_ref(entry);
         if (ret != CM_SUCCESS) {
-            mec_modify_int64(&pack, log_count_pos, j);
-            LOG_DEBUG_WAR("[REP]encode_one_log fail, index=%llu, j=%llu", index, j);
-            break;
+            mec_release_pack(&pack);
+            LOG_DEBUG_ERR("[REP]encode_one_log fail, index=%llu, j=%llu", index, j);
+            return CM_ERROR;
         }
         ps_record1(PS_PACK, index);
     }
@@ -468,7 +470,7 @@ static status_t rep_appendlog_stream(uint64 thread_id, uint32 stream_id, uint32*
             continue;
         }
 
-        if (thread_id != g_append_thread_id[i]) {
+        if (thread_id != g_append_thread_id[node_id]) {
             continue;
         }
 
@@ -615,27 +617,105 @@ static void rep_leader_monitor_entry(thread_t *thread)
     LOG_RUN_INF("leader monitor thread end.");
 }
 
+static status_t rep_adjust_majority_groups(uint32 majority_groups[CM_MAX_GROUP_COUNT],
+    uint32 *count, dcf_node_attr_t *sort_index, uint32 voted_cnt)
+{
+    CM_RETURN_IFERR(md_get_majority_groups(majority_groups, count));
+    if (*count == 0) {
+        return CM_SUCCESS;
+    }
+
+    uint32 total = *count;
+    uint32 idx = 0;
+    for (uint32 i = 0; i < total; i++) {
+        uint32 group_value = majority_groups[i];
+        bool32 exists = CM_FALSE;
+        for (uint32 j = 0 ; j < voted_cnt; j++) {
+            if (sort_index[j].group == group_value) {
+                exists = CM_TRUE;
+                break;
+            }
+        }
+        if (!exists) {
+            majority_groups[i] = CM_INVALID_GROUP_ID;
+            (*count)--;
+        } else {
+            majority_groups[idx] = majority_groups[i];
+            idx++;
+        }
+    }
+    return CM_SUCCESS;
+}
+
+static void rep_cal_voted_group_count(uint32 majority_groups[CM_MAX_GROUP_COUNT],
+    uint32 count, uint32 sort_index_group, uint32 *voted_group_count)
+{
+    for (uint32 j = 0; j < count; j++) {
+        if (majority_groups[j] == sort_index_group && majority_groups[j] != CM_INVALID_GROUP_ID) {
+            (*voted_group_count)++;
+            majority_groups[j] = CM_INVALID_GROUP_ID;
+            break;
+        }
+    }
+    return;
+}
+
 static int rep_index_compare(const void *a, const void *b)
 {
-    if (((dcf_node_weight_t *)a)->index == ((dcf_node_weight_t *)b)->index) {
+    if (((dcf_node_attr_t *)a)->index == ((dcf_node_attr_t *)b)->index) {
         return 0;
-    } else if (((dcf_node_weight_t *)a)->index > ((dcf_node_weight_t *)b)->index) {
+    } else if (((dcf_node_attr_t *)a)->index > ((dcf_node_attr_t *)b)->index) {
         return -1;
     } else {
         return 1;
     }
 }
 
-static status_t rep_cal_commit_index(dcf_node_weight_t *sort_index, uint32 voted_cnt, uint32 stream_id, uint32 quorum,
+static status_t rep_cal_commit_index(dcf_node_attr_t *sort_index, uint32 voted_cnt, uint32 stream_id, uint32 quorum,
     uint64 *commit_idx)
 {
     uint32 all_votes = 0;
-    qsort(sort_index, voted_cnt, sizeof(dcf_node_weight_t), rep_index_compare);
+    uint32 majority_groups[CM_MAX_GROUP_COUNT];
+    uint32 majority_groups_count = 0;
+    uint32 voted_group_count = 0;
+    bool32 is_group_voted = CM_TRUE;
+    for (uint32 i = 0; i < CM_MAX_GROUP_COUNT; i++) {
+        majority_groups[i] = CM_INVALID_GROUP_ID;
+    }
+
+    qsort(sort_index, voted_cnt, sizeof(dcf_node_attr_t), rep_index_compare);
+
+    if (rep_adjust_majority_groups(majority_groups, &majority_groups_count, sort_index, voted_cnt) == CM_SUCCESS) {
+        is_group_voted = majority_groups_count == 0 ? CM_TRUE : CM_FALSE;
+    }
+
+    // for example, there exists 3 node, each node weight is 1, majority_groups is [1,2], while the iteration readed
+    // node 2, we match the condition all_votes(2) >= quorum(2), but there is no node in group 2. after readed node 3,
+    // group 1 and group 2 has at least one node reached the commit index 100. then we set commit index to 100.
+    // NODE_ID  1     2     3
+    // INDEX    102   101   100
+    // GROUP    1     1     2
     for (uint32 i = 0; i < voted_cnt; i++) {
         all_votes += sort_index[i].weight;
-        if (all_votes >= quorum) {
+        if (!is_group_voted) {
+            rep_cal_voted_group_count(majority_groups, majority_groups_count, sort_index[i].group, &voted_group_count);
+            is_group_voted = voted_group_count >= majority_groups_count ? CM_TRUE: CM_FALSE;
+        }
+        if (all_votes >= quorum && is_group_voted) {
             *commit_idx = sort_index[i].index;
             return CM_SUCCESS;
+        }
+    }
+
+    if (all_votes < quorum) {
+        LOG_RUN_ERR("[REP]rep_cal_commit_index: all_votes %u is less than quorum %u", all_votes, quorum);
+    } else if (!is_group_voted) {
+        LOG_RUN_ERR("[REP]rep_cal_commit_index: not all group configed in majority groups was voted,"
+            "voted group count:%u, majority groups count:%u", voted_group_count, majority_groups_count);
+        for (uint32 k = 0; k < majority_groups_count; k++) {
+            if (majority_groups[k] != CM_INVALID_GROUP_ID) {
+                LOG_RUN_ERR("[REP]rep_cal_commit_index, group: %u", majority_groups[k]);
+            }
         }
     }
 
@@ -650,19 +730,22 @@ static status_t rep_try_commit_log(uint32 stream_id)
     bool32 is_elc_voter;
     uint64 commit_index;
     uint32 nodes[CM_MAX_NODE_COUNT];
-    dcf_node_weight_t sort_index[CM_MAX_NODE_COUNT];
+    dcf_node_attr_t sort_index[CM_MAX_NODE_COUNT];
     uint64 min_apply_id = CM_INVALID_ID64;
+    dcf_node_t node_item;
 
     CM_RETURN_IFERR(elc_get_quorum(stream_id, &quorum));
     CM_RETURN_IFERR(md_get_stream_nodes(stream_id, nodes, &node_count));
     for (uint32 i = 0; i < node_count; i++) {
         uint32 node_id = nodes[i];
+        CM_RETURN_IFERR(md_get_node(node_id, &node_item));
         CM_RETURN_IFERR(elc_is_voter(stream_id, node_id, &is_elc_voter));
         if (is_elc_voter) {
             CM_RETURN_IFERR(elc_node_voting_weight(stream_id, node_id, &weight));
             uint64 index = MATCH_INDEX.index;
             sort_index[voted_node].index = index;
             sort_index[voted_node].weight = weight;
+            sort_index[voted_node].group = node_item.group;
             vote_count += weight;
             ++voted_node;
             LOG_DEBUG_INF("[REP]rep_try_commit_log:node_id=%u,match_index=%llu,weight=%u.", node_id, index, weight);
@@ -675,7 +758,7 @@ static status_t rep_try_commit_log(uint32 stream_id)
     CM_RETURN_IFERR(rep_cal_commit_index(sort_index, voted_node, stream_id, quorum, &commit_index));
     uint64 log_term = stg_get_term(stream_id, commit_index);
     uint64 cur_term = elc_get_current_term(stream_id);
-    LOG_DEBUG_INF("[REP]rep_cal_commit_idx:majority_count=%u,try commit_idx=%llu,log_term=%llu,cur_term=%llu.",
+    LOG_DEBUG_INF("[REP]rep_cal_commit_idx:quorum=%u,try commit_idx=%llu,log_term=%llu,cur_term=%llu.",
         quorum, commit_index, log_term, cur_term);
     if (log_term == cur_term) {
         log_id_t last = rep_get_commit_log(stream_id);
@@ -810,7 +893,7 @@ static status_t rep_appendlog_ack_proc(mec_message_t *pack)
             rep_appendlog_trigger(stream_id);
         }
     }
-
+    (void)elc_set_hb_ack_timeout(stream_id, node_id, cm_clock_now());
     return CM_SUCCESS;
 }
 
@@ -889,4 +972,47 @@ static inline void rep_init_thread_id()
             node_cnt++;
         }
     }
+}
+
+static status_t rep_check_group_value_valid(uint32 group_value, bool32 *is_valid)
+{
+    *is_valid = CM_FALSE;
+    uint32 node_list[CM_MAX_NODE_COUNT];
+    uint32 node_count;
+    uint32 stream_list[CM_MAX_STREAM_COUNT];
+    uint32 stream_count;
+    CM_RETURN_IFERR(md_get_stream_list(stream_list, &stream_count));
+    for (uint32 i = 0; i < stream_count; i++) {
+        uint32 stream_id = stream_list[i];
+        CM_RETURN_IFERR(md_get_stream_nodes(stream_id, node_list, &node_count));
+        for (uint32 i = 0; i < node_count; i++) {
+            uint32 node_id = node_list[i];
+            dcf_node_t node_item;
+            bool32 is_voter = CM_FALSE;
+            CM_RETURN_IFERR(md_get_node(node_id, &node_item));
+            CM_RETURN_IFERR(md_is_voter(stream_id, node_id, &is_voter));
+            if (group_value == node_item.group && is_voter) {
+                *is_valid = CM_TRUE;
+                return CM_SUCCESS;
+            }
+        }
+    }
+    return CM_SUCCESS;
+}
+
+status_t rep_check_param_majority_groups()
+{
+    uint32 groups[CM_MAX_GROUP_COUNT] = { 0 };
+    uint32 count = 0;
+    bool32 is_valid = CM_FALSE;
+    CM_RETURN_IFERR(md_get_majority_groups(groups, &count));
+    for (int i = 0; i < count; i++) {
+        CM_RETURN_IFERR(rep_check_group_value_valid(groups[i], &is_valid));
+        if (!is_valid) {
+            LOG_RUN_WAR("[REP] group %u in majority_groups is not valid, will ignored,"
+                "pls reset param MAJORITY_GROUPS.", groups[i]);
+            return CM_ERROR;
+        }
+    }
+    return CM_SUCCESS;
 }

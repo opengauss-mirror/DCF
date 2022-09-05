@@ -284,13 +284,13 @@ void cm_release_thread(thread_t *thread)
 }
 
 #ifdef WIN32
-uint32 cm_get_current_thread_id()
+uint32 cm_get_current_thread_id(void)
 {
     return (uint32)GetCurrentThreadId();
 }
 #else
 thread_local_var pid_t g_tid = (pid_t)(-1);
-uint32 cm_get_current_thread_id()
+uint32 cm_get_current_thread_id(void)
 {
 #if (defined __x86_64__)
 #define __SYS_GET_SPID 186

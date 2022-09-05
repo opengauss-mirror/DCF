@@ -93,7 +93,7 @@ typedef struct st_log_param {
                             (LOG_DEBUG_ERR_LEVEL) | (LOG_DEBUG_WAR_LEVEL) | (LOG_DEBUG_INF_LEVEL) | \
                             (LOG_OPER_LEVEL) | (LOG_MEC_LEVEL) | (LOG_TRACE_LEVEL) | \
                             (LOG_PROFILE_LEVEL))
-log_param_t *cm_log_param_instance();
+log_param_t *cm_log_param_instance(void);
 
 
 #define LOG_RUN_ERR_ON   (cm_log_param_instance()->log_level & (LOG_RUN_ERR_LEVEL))
@@ -136,7 +136,6 @@ typedef void (*cm_log_write_func_t)(log_file_handle_t *log_file_handle, char *bu
 #define CM_MAX_TIME_STRLEN            (uint32)(48)
 
 log_file_handle_t *cm_log_logger_file(uint32 log_count);
-log_param_t *cm_log_param_instance();
 status_t cm_log_init(log_type_t log_type, const char *file_name);
 void cm_log_set_path_permissions(uint16 val);
 void cm_log_set_file_permissions(uint16 val);
@@ -148,8 +147,8 @@ void cm_write_alarm_log(uint32 warn_id, const char *format, ...) CM_CHECK_FMT(2,
 void cm_write_normal_log(log_type_t log_type, log_level_t log_level, const char *code_file_name, uint32 code_line_num,
     const char *module_name, bool32 need_rec_filelog, const char *format, ...) CM_CHECK_FMT(7, 8);
 void cm_write_trace_log(uint64 tracekey, const char *format, ...);
-void cm_fync_logfile();
-void cm_close_logfile();
+void cm_fync_logfile(void);
+void cm_close_logfile(void);
 status_t cm_set_log_module_name(const char* module_name, int32 len);
 
 
@@ -361,12 +360,12 @@ void cm_write_oper_log(const char *format, ...);
     } while (0)
 
 void set_trace_key(uint64 tracekey);
-uint64 get_trace_key();
+uint64 get_trace_key(void);
 bool8 is_trace_key(uint64 tracekey);
-void unset_trace_key();
+void unset_trace_key(void);
 
 #define LOG_TIME_BEGIN(name) \
-uint64 __##name##begin = g_timer()->now;
+uint64 __##name##begin = g_timer()->now
 
 #define LOG_TIME_END(name) \
 do { \

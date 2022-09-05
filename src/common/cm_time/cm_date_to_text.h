@@ -161,7 +161,7 @@ typedef struct st_append_date_pair {
 
 #define CM_DATE_TEXT_ARR_LEN 43
 
-extern const t_append_date_pair g_append_date_text_arr[];
+extern const t_append_date_pair g_append_date_text_arr[CM_DATE_TEXT_ARR_LEN];
 
 errno_t cm_fmt_indicator(const append_date_text_para_t* para, append_date_text_res_t* res);
 

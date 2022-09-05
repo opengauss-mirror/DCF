@@ -45,6 +45,7 @@
 #include "cb_func.h"
 #include "mec_reactor.h"
 #include "mec_instance.h"
+#include "md_param.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -832,31 +833,32 @@ int dcf_start(unsigned int node_id, const char *cfg_str)
     init_dcf_errno_desc();
     cm_reset_error();
 
-    status_t ret = init_main_threads(node_id, cfg_str);
-    if (ret != CM_SUCCESS) {
-        clear_resource();
-        cm_unlatch(&g_dcf_latch, NULL);
-        return CM_ERROR;
-    }
+    do {
+        status_t ret = init_main_threads(node_id, cfg_str);
+        if (ret != CM_SUCCESS) {
+            break;
+        }
 
-    ret = init_tool_threads();
-    if (ret != CM_SUCCESS) {
-        clear_resource();
-        cm_unlatch(&g_dcf_latch, NULL);
-        return CM_ERROR;
-    }
+        ret = init_tool_threads();
+        if (ret != CM_SUCCESS) {
+            break;
+        }
 
-    ret = add_manual_notify_item();
-    if (ret != CM_SUCCESS) {
-        clear_resource();
-        cm_unlatch(&g_dcf_latch, NULL);
-        return CM_ERROR;
-    }
+        ret = add_manual_notify_item();
+        if (ret != CM_SUCCESS) {
+            break;
+        }
 
-    LOG_RUN_INF("dcf start succeed.");
-    g_dcf_inited = CM_TRUE;
-    cm_unlatch(&g_dcf_latch, NULL);
-    return CM_SUCCESS;
+        (void)rep_check_param_majority_groups();
+        LOG_RUN_INF("dcf start succeed.");
+        g_dcf_inited = CM_TRUE;
+        return CM_SUCCESS;
+    } while (0);
+
+    clear_resource();
+    LOG_RUN_INF("dcf start failed");
+
+    return CM_ERROR;
 }
 
 int dcf_write(unsigned int stream_id, const char *buffer, unsigned int length,
@@ -2116,7 +2118,7 @@ status_t universal_write_ack_proc(mec_message_t *pack)
     return CM_SUCCESS;
 }
 
-status_t dcf_get_commit_index_local(unsigned int stream_id, unsigned int is_consensus,
+static status_t dcf_get_commit_index_local(unsigned int stream_id, unsigned int is_consensus,
     unsigned long long* commit_index)
 {
     dcf_role_t node_role = DCF_ROLE_UNKNOWN;
@@ -2128,10 +2130,8 @@ status_t dcf_get_commit_index_local(unsigned int stream_id, unsigned int is_cons
         }
     }
     *commit_index = rep_get_data_commit_index(stream_id);
-    if (*commit_index == 0) {
-        LOG_DEBUG_ERR("[DCF] dcf get local log data commit index failed.");
-        return CM_ERROR;
-    }
+    LOG_DEBUG_INF("[DCF] dcf get local data commit index:%llu", *commit_index);
+
     return CM_SUCCESS;
 }
 
@@ -2192,7 +2192,7 @@ status_t dcf_get_commit_index_ack_proc(mec_message_t *pack)
     return CM_SUCCESS;
 }
 
-int dcf_get_commit_index_remote(unsigned int stream_id, unsigned int is_consensus,
+static int dcf_get_commit_index_remote(unsigned int stream_id, unsigned int is_consensus,
     unsigned long long* commit_index)
 {
     uint32 req_id = alloc_req_id(&g_consensus_hc_info);
@@ -2211,10 +2211,6 @@ int dcf_get_commit_index_remote(unsigned int stream_id, unsigned int is_consensu
         result = get_commit_index_result(req_id);
         if ((int64)result != index_default) {
             free_req_id(&g_consensus_hc_info, req_id);
-            if (result == 0) {
-                LOG_DEBUG_ERR("[DCF]Check health using req_id=%d failed for getting commit index.", req_id);
-                return CM_ERROR;
-            }
 
             LOG_DEBUG_INF("[DCF]leader check health succeed, stream_id=%u result=%llu req_id=%u",
                 stream_id, result, req_id);

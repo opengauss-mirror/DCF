@@ -198,7 +198,7 @@ typedef enum en_num_flag {
 #define CM_IS_INTEGER_TYPE(type)                                                                                       \
     ((type) > CM_TYPE_BASE && (type) < CM_TYPE__DO_NOT_USE && (CM_TYPE_MASK(type) & CM_TYPE_MASK_INTEGER) > 0)
 
-extern const char *g_num_errinfos[];
+extern const char *g_num_errinfos[NERR__NOT_USED__];
 
 #define CM_CHECK_NUM_ERRNO(err_no)  \
     if ((err_no) != NERR_SUCCESS) { \

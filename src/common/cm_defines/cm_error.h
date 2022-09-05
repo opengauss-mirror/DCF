@@ -156,7 +156,7 @@ void cm_get_error(int32 *code, const char **message);
 void cm_set_error(const char *file, uint32 line, cm_errno_t code, const char *format, ...) CM_CHECK_FMT(4, 5);
 void cm_set_error_ex(const char *file, uint32 line, cm_errno_t code, const char *format, ...) CM_CHECK_FMT(4, 5);
 
-extern const char *g_error_desc[];
+extern const char *g_error_desc[CM_ERROR_COUNT];
 
 /* convert text to string, using local thread buffer */
 char *cm_get_t2s_addr(void);
