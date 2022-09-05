@@ -113,9 +113,11 @@ uint32 elc_get_rcv_best_priority_node(uint32 stream_id)
 
     elc_stream_lock_s(stream_id);
     uint32 leader_group = elc_stream_get_leader_group(stream_id);
-    uint32 best_group = elc_stream_get_my_group(stream_id);
-    uint64 best_prio = elc_stream_get_priority(stream_id);
+    uint32 my_group = elc_stream_get_my_group(stream_id);
+    uint64 my_prio = elc_stream_get_priority(stream_id);
     elc_stream_unlock(stream_id);
+    uint32 best_group = my_group;
+    uint64 best_prio = my_prio;
 
     elc_status_check_t *status_check = &g_status_check[stream_id];
     uint32 cur_node = md_get_cur_node();
@@ -149,8 +151,8 @@ uint32 elc_get_rcv_best_priority_node(uint32 stream_id)
     }
     elc_status_check_unlock(stream_id);
 
-    LOG_RUN_INF("[ELC]best_prio:cur_node=%u,leader_group=%u,best_group=%u,best_prio=%llu,rcv_best_priority_node=%u",
-        cur_node, leader_group, best_group, best_prio, ret);
+    LOG_RUN_INF("[ELC]best_prio:cur_node=%u,my_group=%u,my_prio=%llu,leader_group=%u,best_group=%u,best_prio=%llu,"
+        "rcv_best_priority_node=%u", cur_node, my_group, my_prio, leader_group, best_group, best_prio, ret);
     return ret;
 }
 

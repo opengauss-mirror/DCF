@@ -45,6 +45,8 @@ int md_consensus_notify_cb(uint32 stream_id, uint64 index, const char *buf, uint
         ret = mec_update_profile_inst();
         if (ret != CM_SUCCESS) {
             LOG_DEBUG_ERR("[META]consensus_notify:mec_update_profile_inst failed.");
+        } else {
+            (void)rep_check_param_majority_groups();
         }
     }
 
@@ -59,6 +61,8 @@ int md_consensus_notify_cb(uint32 stream_id, uint64 index, const char *buf, uint
         ret = elc_update_node_group(stream_id);
         if (ret != CM_SUCCESS) {
             LOG_DEBUG_ERR("[META]consensus_notify:elc_update_node_group failed.");
+        } else {
+            (void)rep_check_param_majority_groups();
         }
     }
 

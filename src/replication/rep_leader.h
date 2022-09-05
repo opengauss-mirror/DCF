@@ -47,6 +47,7 @@ status_t rep_leader_acceptlog_proc(uint32 stream_id);
 
 void rep_leader_acceptlog(uint32 stream_id, uint64 term, uint64 index, status_t status);
 
+status_t rep_check_param_majority_groups();
 #ifdef __cplusplus
 }
 #endif

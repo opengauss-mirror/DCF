@@ -25,6 +25,7 @@
 #ifndef __UTIL_ERROR__
 #define __UTIL_ERROR__
 #include "cm_error.h"
+#include "cm_text.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -84,7 +85,7 @@ typedef enum en_dcf_errno {
     ERR_DECOMPRESS_ERROR         = 536,
     ERR_COMPRESS_FREE_ERROR      = 537,
     // need update DCF_ERRNO_NETWORK_END after add new ERRNO
-    DCF_ERRNO_NETWORK_END        = ERR_SSL_FILE_PERMISSION + 1,
+    DCF_ERRNO_NETWORK_END        = ERR_COMPRESS_FREE_ERROR + 1,
     /* replication errors: 600 - 699 */
     DCF_ERRNO_REP_BEGIN          = 600,
     ERR_TERM_IS_NOT_MATCH	     = 600,
@@ -92,7 +93,7 @@ typedef enum en_dcf_errno {
     ERR_APPEN_LOG_REQ_LOST       = 602,
     ERR_ROLE_NOT_LEADER          = 603,
     // need update DCF_ERRNO_REP_END after add new ERRNO
-    DCF_ERRNO_REP_END            = ERR_APPEN_LOG_REQ_LOST + 1,
+    DCF_ERRNO_REP_END            = ERR_ROLE_NOT_LEADER + 1,
     /* storage errors: 700 - 799 */
     DCF_ERRNO_STG_BEGIN         = 700,
     ERR_APPEND_ENTRY_FAILED     = 700,
@@ -108,12 +109,13 @@ typedef enum en_dcf_errno {
     DCF_ERRNO_CFG_BEGIN        = 800,
     ERR_PARSE_CFG_STR          = 800,
     ERR_QUERY_DCF_INFO_ERR     = 801,
-    DCF_ERRNO_CFG_END          = ERR_PARSE_CFG_STR + 1,
+    DCF_ERRNO_CFG_END          = ERR_QUERY_DCF_INFO_ERR + 1,
 
     ERR_DCF_CEIL = CM_ERROR_COUNT,
 }dcf_errno_t;
 
 void init_dcf_errno_desc(void);
+bool32 is_dcf_errno_msg_defined(int errnum);
 
 #ifdef __cplusplus
 }

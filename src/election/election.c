@@ -277,15 +277,15 @@ status_t elc_init()
 void elc_deinit()
 {
     if (g_elc_init) {
+        cm_close_thread(&g_status_check_thread);
+        cm_close_thread(&g_status_notify_thread);
+
         unregister_msg_process(MEC_CMD_VOTE_REQUEST_RPC_REQ);
         unregister_msg_process(MEC_CMD_VOTE_REQUEST_RPC_ACK);
         unregister_msg_process(MEC_CMD_PROMOTE_LEADER_RPC_REQ);
 
         unregister_msg_process(MEC_CMD_STATUS_CHECK_RPC_REQ);
         unregister_msg_process(MEC_CMD_STATUS_CHECK_RPC_ACK);
-
-        cm_close_thread(&g_status_check_thread);
-        cm_close_thread(&g_status_notify_thread);
     }
     g_elc_init = CM_FALSE;
 }
@@ -480,6 +480,28 @@ status_t elc_get_quorum(uint32 stream_id, uint32* quorum)
     status_t ret = elc_stream_get_quorum(stream_id, quorum);
     elc_stream_unlock(stream_id);
     return ret;
+}
+
+status_t elc_set_hb_timeout(uint32 stream_id, timespec_t time)
+{
+    elc_stream_lock_x(stream_id);
+    if (elc_stream_set_timeout(stream_id, time) != CM_SUCCESS) {
+        elc_stream_unlock(stream_id);
+        return CM_ERROR;
+    }
+    elc_stream_unlock(stream_id);
+    return CM_SUCCESS;
+}
+
+status_t elc_set_hb_ack_timeout(uint32 stream_id, uint32 node_id, timespec_t time)
+{
+    elc_stream_lock_x(stream_id);
+    if (elc_stream_set_hb_ack_time(stream_id, node_id, time) != CM_SUCCESS) {
+        elc_stream_unlock(stream_id);
+        return CM_ERROR;
+    }
+    elc_stream_unlock(stream_id);
+    return CM_SUCCESS;
 }
 
 status_t elc_is_voter(uint32 stream_id, uint32 node_id, bool32* is_voter)

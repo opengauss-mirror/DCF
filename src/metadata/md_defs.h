@@ -42,6 +42,7 @@ extern "C" {
 #define CM_MAX_NODE_COUNT    256
 #define CM_MAX_NODE_PER_STREAM    32
 #define CM_MAX_MSG_TIMEOUT 600000   // 10min
+#define CM_MAX_GROUP_COUNT    128
 
 #define CM_INVALID_NODE_ID   0
 #define CM_NODE_ID_ALL       0xFFFFFFFF
@@ -71,6 +72,7 @@ extern "C" {
 #define CM_MAX_ELC_TIMEOUT     600 // s
 #define CM_ELC_NORS_WEIGHT     1
 #define CM_DEFAULT_GROUP_ID    0
+#define CM_INVALID_GROUP_ID    (uint32)(0xFFFFFFFF)
 
 #define SPLIT_CHR_LOG_LEVEL '|'
 
@@ -121,10 +123,11 @@ typedef struct st_dcf_node_role {
     dcf_role_t default_role;
 } dcf_node_role_t;
 
-typedef struct st_dcf_node_weight {
+typedef struct st_dcf_node_attr {
     uint64 index;
     uint32 weight;
-} dcf_node_weight_t;
+    uint32 group;
+} dcf_node_attr_t;
 
 typedef struct st_stream_t {
     uint32 stream_id;
@@ -189,6 +192,7 @@ typedef enum en_dcf_param {
     DCF_PARAM_DN_FLOW_CONTROL_RTO,
     DCF_PARAM_DN_FLOW_CONTROL_RPO,
     DCF_PARAM_LOG_SUPPRESS_ENABLE,
+    DCF_PARAM_MAJORITY_GROUPS,
     DCF_PARAM_CEIL,
 } dcf_param_t;
 
@@ -255,6 +259,7 @@ typedef union un_param_value {
     uint32 dn_flow_control_rto;
     uint32 dn_flow_control_rpo;
     uint32 log_suppress_enable;
+    char majority_groups[MAX_MAJORITY_GROUPS_STR_LEN];
     cipher_t inter_pwd;
 } param_value_t;
 

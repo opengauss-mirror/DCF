@@ -27,6 +27,7 @@
 
 #include "cm_types.h"
 #include "cm_error.h"
+#include "md_param.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,6 +40,7 @@ status_t mec_update_profile_inst();
 status_t elc_update_node_role(uint32 stream_id);
 status_t elc_update_node_group(uint32 stream_id);
 status_t elc_update_node_priority(uint32 stream_id);
+status_t rep_check_param_majority_groups();
 #ifdef __cplusplus
 }
 #endif

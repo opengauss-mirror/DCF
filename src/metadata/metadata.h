@@ -77,6 +77,8 @@ char* md_get_buffer();
 status_t parse_change_member_str(const char *change_str, uint32 *stream_id, uint32 *node_id,
     dcf_change_member_t *change_info);
 
+status_t md_get_majority_groups(uint32 groups[CM_MAX_GROUP_COUNT], uint32 *count);
+
 #ifdef __cplusplus
 }
 #endif

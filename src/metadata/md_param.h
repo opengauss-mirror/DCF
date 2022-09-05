@@ -39,6 +39,7 @@ status_t get_param_by_name(const char *param_name, char *param_value, unsigned i
 status_t set_param(dcf_param_t param_type, const param_value_t* param_value);
 status_t verify_param_value(const char *param_name, const char *param_value,
     dcf_param_t *param_type, param_value_t *out_value);
+status_t get_param_magority_groups(uint32 groups[CM_MAX_GROUP_COUNT], uint32 *count);
 
 status_t verify_param_int_common(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
 status_t verify_param_int_auto_elc_prio_en(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
@@ -65,6 +66,7 @@ status_t verify_param_mec_fragment_size(dcf_param_t param_type, const char *para
 status_t verify_param_socket_timeout(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
 status_t verify_param_connect_timeout(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
 status_t verify_param_log_suppress_enable(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
+status_t verify_param_majority_groups(dcf_param_t param_type, const char *param_value, param_value_t *out_value);
 
 #ifdef __cplusplus
 }

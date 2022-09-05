@@ -338,8 +338,8 @@ status_t md_init(uint32 node_id, const char* cfg_str)
     CM_RETURN_IFERR(reset_node_list(g_metadata.all_nodes, g_metadata.streams));
     CM_RETURN_IF_FALSE(check_node_id_valid(node_id));
     g_metadata.current_node_id = node_id;
+    LOG_RUN_INF("[META]Md init succeed, checksum:%u", g_metadata.checksum);
 
-    LOG_RUN_INF("[META]Md init succeed, metadata:%s checksum:%u", md_get_buffer(), g_metadata.checksum);
     return CM_SUCCESS;
 }
 
@@ -729,6 +729,18 @@ status_t md_set_checksum(uint32 checksum)
 char* md_get_buffer()
 {
     return g_metadata.buffer;
+}
+
+status_t md_get_majority_groups(uint32 groups[CM_MAX_GROUP_COUNT], uint32 *count)
+{
+    cm_latch_s(&g_metadata.latch, 0, CM_FALSE, NULL);
+    status_t ret = get_param_magority_groups(groups, count);
+    if (ret != CM_SUCCESS) {
+        cm_unlatch(&g_metadata.latch, NULL);
+        return CM_ERROR;
+    }
+    cm_unlatch(&g_metadata.latch, NULL);
+    return CM_SUCCESS;
 }
 
 #ifdef __cplusplus
