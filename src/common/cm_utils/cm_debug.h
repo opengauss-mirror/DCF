@@ -25,9 +25,6 @@
 #define __CM_DEBUG_H_
 
 #include <stdio.h>
-#include <assert.h>
-#include <memory.h>
-#include <stdlib.h>
 #include "cm_types.h"
 #include "cm_log.h"
 
@@ -46,9 +43,9 @@ static inline void cm_assert(bool32 condition)
 #endif
 
 #ifdef WIN32
-#define CM_STATIC_ASSERT(cond) typedef char __static_assert_t[!!(cond)];
+#define CM_STATIC_ASSERT(cond) typedef char __static_assert_t[!!(cond)]
 #else
-#define CM_STATIC_ASSERT(cond) typedef char __static_assert_t[1 - 2*(!!!(cond))];
+#define CM_STATIC_ASSERT(cond) typedef char __static_assert_t[1 - 2*(!!!(cond))]
 #endif
 
 static inline void cm_exit(int32 exitcode)

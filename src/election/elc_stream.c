@@ -60,8 +60,8 @@ typedef struct st_elc_info {
 static elc_info_t g_stream_list[CM_MAX_STREAM_COUNT];
 static role_notify_t g_stream_notify[CM_MAX_STREAM_COUNT];
 cm_thread_cond_t g_status_notify_cond;
-usr_cb_status_notify_t g_cb_status_nodify = NULL;
-usr_cb_election_notify_t g_cb_election_nodify = NULL;
+usr_cb_status_notify_t g_cb_status_notify = NULL;
+usr_cb_election_notify_t g_cb_election_notify = NULL;
 
 status_t get_current_node_role(uint32 stream_id, uint32 current_node_id, uint32 leader_id, dcf_role_t *role)
 {
@@ -305,18 +305,17 @@ void elc_stream_notify_proc()
                     continue;
                 }
                 elc_stream_set_inter_promote_flag(stream_id, CM_FALSE);
-
-                if (g_cb_status_nodify != NULL) {
-                    int ret = g_cb_status_nodify(stream_id,
+                
+                (void)rep_role_notify(stream_id, old_role, role);
+                if (g_cb_status_notify != NULL) {
+                    int ret = g_cb_status_notify(stream_id,
                         (uint32)((role == DCF_ROLE_LEADER) ? DCF_ROLE_LEADER : DCF_ROLE_FOLLOWER));
                     LOG_DEBUG_INF("[ELC]Callback: status_changed_notify, retcode=%d", ret);
                 }
-
-                (void)rep_role_notify(stream_id, old_role, role);
             }
             if (notify_item.new_leader != CM_INVALID_NODE_ID) {
-                if (g_cb_election_nodify != NULL) {
-                    int ret = g_cb_election_nodify(stream_id, notify_item.new_leader);
+                if (g_cb_election_notify != NULL) {
+                    int ret = g_cb_election_notify(stream_id, notify_item.new_leader);
                     LOG_DEBUG_INF("[ELC]Callback: status_election_notify, retcode=%d", ret);
                 }
                 notify_item.new_leader = CM_INVALID_NODE_ID;
@@ -508,13 +507,13 @@ void elc_stream_unlock(uint32 stream_id)
 
 status_t elc_register_notify(usr_cb_status_notify_t cb_func)
 {
-    g_cb_status_nodify = cb_func;
+    g_cb_status_notify = cb_func;
     return CM_SUCCESS;
 }
 
 status_t elc_register_election_notify(usr_cb_election_notify_t cb_func)
 {
-    g_cb_election_nodify = cb_func;
+    g_cb_election_notify = cb_func;
     return CM_SUCCESS;
 }
 

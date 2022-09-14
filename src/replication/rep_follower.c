@@ -337,7 +337,7 @@ static status_t rep_appendlog_req_proc(mec_message_t *pack)
     if (ret != CM_SUCCESS) {
         return rep_follower_send_ack1(stream_id, pack->head->src_inst, &appendlog_req, error_no);
     }
-
+    (void)elc_set_hb_timeout(stream_id, cm_clock_now());
     return CM_SUCCESS;
 }
 

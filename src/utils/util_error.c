@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-const char *dcf_error_desc[CM_ERROR_COUNT] = {
+static const char *dcf_error_desc[CM_ERROR_COUNT] = {
     // network errors 500~599
     [ERR_INIT_NETWORK_ENV]         = "Init network env failed, %s",
     [ERR_ESTABLISH_TCP_CONNECTION] = "Failed to establish tcp connection to [%s]:[%u], errno %d",
@@ -103,6 +103,17 @@ void init_dcf_errno_desc(void)
     for (int i = DCF_ERRNO_CFG_BEGIN; i < DCF_ERRNO_CFG_END; i++) {
         cm_register_error(i, dcf_error_desc[i]);
     }
+}
+
+bool32 is_dcf_errno_msg_defined(int errnum)
+{
+    if (errnum >= (int)CM_ERROR_COUNT || errnum < 0) {
+        return CM_FALSE;
+    }
+    if (CM_IS_EMPTY_STR(dcf_error_desc[errnum])) {
+        return CM_FALSE;
+    }
+    return CM_TRUE;
 }
 
 #ifdef __cplusplus

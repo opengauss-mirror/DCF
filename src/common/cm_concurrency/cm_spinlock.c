@@ -59,7 +59,7 @@ void cm_spin_sleep_and_stat2(uint32 ms)
     g_tls_spin_sleeps += usecs;
 }
 
-uint64 cm_total_spin_usecs()
+uint64 cm_total_spin_usecs(void)
 {
     return g_tls_spin_sleeps;
 }

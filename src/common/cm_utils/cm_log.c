@@ -111,7 +111,7 @@ log_file_handle_t *cm_log_logger_file(uint32 log_count)
     return &g_logger[log_count];
 }
 static log_param_t g_log_param = {0};
-inline log_param_t *cm_log_param_instance()
+inline log_param_t *cm_log_param_instance(void)
 {
     return &g_log_param;
 }
@@ -1218,7 +1218,7 @@ void cm_log_set_path_permissions(uint16 val)
     g_log_param.log_path_permissions = log_path_perm;
 }
 
-void cm_fync_logfile()
+void cm_fync_logfile(void)
 {
 #ifndef _WIN32
     for (int i = 0; i < LOG_COUNT; i++) {
@@ -1230,7 +1230,7 @@ void cm_fync_logfile()
 #endif
 }
 
-void cm_close_logfile()
+void cm_close_logfile(void)
 {
     for (uint32 i = 0; i < LOG_COUNT; i++) {
         if (g_logger[i].file_handle == CM_INVALID_FD) {

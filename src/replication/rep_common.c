@@ -185,15 +185,27 @@ static void rep_accept_thread_entry(thread_t *thread)
     }
 }
 
+static void rep_reset_commit_idx(uint32 stream_id, bool8 is_leader, log_id_t *commit_log)
+{
+    log_id_t disk_log = stg_last_disk_log_id(stream_id);
+    if (is_leader && disk_log.index < commit_log->index) {
+        commit_log->index = disk_log.index;
+        commit_log->term = disk_log.term;
+    }
+}
+
 static status_t rep_apply_proc(uint32 stream_id, bool8* stream_exists_log)
 {
     bool8 is_leader = I_AM_LEADER(stream_id);
     // apply the committed log
     uint64 applied_index = stg_get_applied_index(stream_id);
     log_id_t commit_log = rep_get_commit_log(stream_id);
-    CHECK_IF_LOGGER_PROC(stream_id, applied_index, commit_log.index); // LOGGER only set apply index.
+    // LOGGER only set apply index.
+    CHECK_IF_LOGGER_PROC(stream_id, applied_index, commit_log.index);
     *stream_exists_log = commit_log.index > applied_index;
     uint64 cur_term = elc_get_current_term(stream_id);
+    // to ensure leader's log is flushed
+    rep_reset_commit_idx(stream_id, is_leader, &commit_log);
     for (uint64 index = applied_index + 1; index <= commit_log.index; index++) {
         ps_record1(PS_BEING_APPLY, index);
         log_entry_t* entry = stg_get_entry(stream_id, index);
@@ -453,7 +465,7 @@ void print_stream_state_follower(uint32 stream_id)
     char   accept_index_str[64], commit_index_str[64];
 
     uint32 node_id = md_get_cur_node();
-    dcf_role_t role = elc_get_node_role(stream_id);;
+    dcf_role_t role = elc_get_node_role(stream_id);
     log_id_t accept_index = stg_last_disk_log_id(stream_id);
     PRTS_RETVOID_IFERR(snprintf_s(accept_index_str, sizeof(accept_index_str), sizeof(accept_index_str) - 1,
         "(%llu,%llu)",
