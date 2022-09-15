@@ -47,7 +47,7 @@ stat_item_attr_t g_stat_item_attrs[STAT_ITEM_ID_CEIL] = { 0 };
 status_t cm_reg_stat_item(stat_item_id_t item_id, const char* name, stat_unit_t unit, uint32 indicator,
     cb_get_value_func_t value_func)
 {
-    MEMS_RETURN_IFERR(strcpy_s(g_stat_item_attrs[item_id].name, STAT_ITEM_NAME_MAX_LEN + 1, name));
+    MEMS_RETURN_IFERR(strcpy_s(g_stat_item_attrs[item_id].name, STAT_ITEM_NAME_MAX_LEN, name));
     g_stat_item_attrs[item_id].unit = unit;
     g_stat_item_attrs[item_id].indicator = indicator;
     g_stat_item_attrs[item_id].func = value_func;
