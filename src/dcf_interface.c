@@ -852,10 +852,12 @@ int dcf_start(unsigned int node_id, const char *cfg_str)
         (void)rep_check_param_majority_groups();
         LOG_RUN_INF("dcf start succeed.");
         g_dcf_inited = CM_TRUE;
+        cm_unlatch(&g_dcf_latch, NULL);
         return CM_SUCCESS;
     } while (0);
 
     clear_resource();
+    cm_unlatch(&g_dcf_latch, NULL);
     LOG_RUN_INF("dcf start failed");
 
     return CM_ERROR;

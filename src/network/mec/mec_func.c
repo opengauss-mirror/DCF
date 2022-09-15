@@ -938,6 +938,7 @@ static status_t mec_accept(cs_pipe_t *pipe)
         cm_sleep(CM_SLEEP_10_FIXED);
         count++;
         if (count > CM_100X_FIXED) {
+            (void)cm_atomic32_cas(&mec_pipe->recv_need_close, CM_FALSE, CM_TRUE);
             LOG_RUN_ERR("[MEC]wait old pipe clean failed,force clean.stream %u,src %u,priv %u,reg %u",
                 head.stream_id, head.src_inst, priv, mec_pipe->is_reg);
             return CM_ERROR;
