@@ -104,11 +104,6 @@ LOCAL_PATH=${0}
 CUR_PATH=$(pwd)
 
 LOCAL_DIR=$(dirname "${LOCAL_PATH}")
-if [ -z "${PLAT_FORM_STR}" ];then
-    echo "ERROR: env var {PLAT_FORM_STR} not set"
-    exit 1
-fi
-echo "{PLAT_FORM_STR} is: ${PLAT_FORM_STR}"
 export PACKAGE=$LOCAL_DIR/../../../
 export OUT_PACKAGE=dcf
 
@@ -121,8 +116,8 @@ mkdir -p $DCF_LIBRARYS/lz4
 mkdir -p $DCF_LIBRARYS/zstd
 mkdir -p $DCF_LIBRARYS/cJSON
 
-export LIB_PATH=$binarylib_dir/dependency/$PLAT_FORM_STR
-export P_LIB_PATH=$binarylib_dir/platform/$PLAT_FORM_STR
+export LIB_PATH=$binarylib_dir/kernel/dependency/
+export P_LIB_PATH=$binarylib_dir/kernel/platform/
 
 cp -r $P_LIB_PATH/Huawei_Secure_C/comm/lib     $DCF_LIBRARYS/huawei_security/lib
 cp -r $LIB_PATH/openssl/comm/lib                  $DCF_LIBRARYS/openssl/lib
@@ -146,7 +141,7 @@ else
     make BUILD_TYPE=${version_mode} -sj 8
 fi
 
-mkdir -p $binarylib_dir/component/${PLAT_FORM_STR}/${OUT_PACKAGE}/include
-mkdir -p $binarylib_dir/component/${PLAT_FORM_STR}/${OUT_PACKAGE}/lib
-cp src/interface/dcf_interface.h $binarylib_dir/component/${PLAT_FORM_STR}/${OUT_PACKAGE}/include
-cp output/lib/libdcf.* $binarylib_dir/component/${PLAT_FORM_STR}/${OUT_PACKAGE}/lib
+mkdir -p $binarylib_dir/kernel/component/${OUT_PACKAGE}/include
+mkdir -p $binarylib_dir/kernel/component/${OUT_PACKAGE}/lib
+cp src/interface/dcf_interface.h $binarylib_dir/kernel/component/${OUT_PACKAGE}/include
+cp output/lib/libdcf.* $binarylib_dir/kernel/component/${OUT_PACKAGE}/lib
