@@ -587,7 +587,7 @@ status_t elc_stream_set_work_mode(uint32 stream_id, dcf_work_mode_t work_mode, u
     uint32 count;
     uint32 node_id = md_get_cur_node();
     if (work_mode == WM_MINORITY) {
-        CM_RETURN_IFERR(md_get_stream_nodes_count(stream_id, &count));
+        CM_RETURN_IFERR(md_get_voter_num(stream_id, &count));
         if (vote_num == 0 || vote_num > count) {
             LOG_RUN_ERR("invalid vote_num:%u", vote_num);
             return CM_ERROR;
