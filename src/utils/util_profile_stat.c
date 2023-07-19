@@ -47,7 +47,7 @@ stat_item_attr_t g_stat_item_attrs[STAT_ITEM_ID_CEIL] = { 0 };
 status_t cm_reg_stat_item(stat_item_id_t item_id, const char* name, stat_unit_t unit, uint32 indicator,
     cb_get_value_func_t value_func)
 {
-    MEMS_RETURN_IFERR(strcpy_s(g_stat_item_attrs[item_id].name, STAT_ITEM_NAME_MAX_LEN + 1, name));
+    MEMS_RETURN_IFERR(strcpy_s(g_stat_item_attrs[item_id].name, STAT_ITEM_NAME_MAX_LEN, name));
     g_stat_item_attrs[item_id].unit = unit;
     g_stat_item_attrs[item_id].indicator = indicator;
     g_stat_item_attrs[item_id].func = value_func;
@@ -61,38 +61,39 @@ void stat_record(stat_item_id_t item_id, uint64 value)
         return;
     }
     int64 table_id = cm_atomic_get(&g_stat_table_id);
-    stat_item_t **item_local = &stat_item_local[table_id][item_id];
-    if (*item_local == NULL) {
+    stat_item_t *item_local = stat_item_local[table_id][item_id];
+    if (item_local == NULL) {
         cm_spin_lock(&g_lock, NULL);
         uint32 cnt = g_stat_count[table_id][item_id];
         if (cnt >= MAX_ITEM_COUNT) {
             cm_spin_unlock(&g_lock);
             return;
         }
-        *item_local = (stat_item_t *) malloc(sizeof(stat_item_t));
-        if (*item_local == NULL) {
+        item_local = (stat_item_t *) malloc(sizeof(stat_item_t));
+        if (item_local == NULL) {
             cm_spin_unlock(&g_lock);
             return;
         }
+        stat_item_local[table_id][item_id] = item_local;
         g_stat_count[table_id][item_id]++;
         cm_spin_unlock(&g_lock);
 
-        (*item_local)->count = 0;
-        (*item_local)->value = 0;
-        (*item_local)->avg_value = 0;
-        (*item_local)->max = 0;
-        (*item_local)->min = CM_MAX_UINT64;
-        (*item_local)->id = item_id;
-        g_stat_table[table_id][item_id][cnt] = *item_local;
+        item_local->count = 0;
+        item_local->value = 0;
+        item_local->avg_value = 0;
+        item_local->max = 0;
+        item_local->min = CM_MAX_UINT64;
+        item_local->id = item_id;
+        g_stat_table[table_id][item_id][cnt] = item_local;
     }
 
-    (*item_local)->value += value;
-    (*item_local)->count++;
+    item_local->value += value;
+    item_local->count++;
     if (g_stat_item_attrs[item_id].indicator & STAT_INDICATOR_MAX) {
-        (*item_local)->max = MAX(value, (*item_local)->max);
+        item_local->max = MAX(value, item_local->max);
     }
     if (g_stat_item_attrs[item_id].indicator & STAT_INDICATOR_MIN) {
-        (*item_local)->min = MIN(value, (*item_local)->min);
+        item_local->min = MIN(value, item_local->min);
     }
 }
 static inline int get_cal_table_id()
@@ -404,12 +405,21 @@ status_t cm_profile_stat_init()
     return CM_SUCCESS;
 }
 
+static void cm_set_stat_item_null(void)
+{
+    for (uint32 i = 0; i < STAT_TABLE_SIZE; i++) {
+        for (uint32 j = 0; j < STAT_ITEM_ID_CEIL; j++) {
+            stat_item_local[i][j] = NULL;
+        }
+    }
+}
 
 void cm_profile_stat_uninit()
 {
     if (g_profile_stat_init) {
         cm_close_thread(&g_profile_stat_thread);
         stat_free();
+        cm_set_stat_item_null();
     }
     g_profile_stat_init = CM_FALSE;
 }

@@ -106,23 +106,23 @@ extern "C" {
 #define CM_ALIGN4_SIZE 4
 
 /* size alignment */
-#define CM_ALIGN4(size)  ((((size)&0x03) == 0) ? (size) : ((size) + 0x04 - ((size)&0x03)))
-#define CM_ALIGN8(size)  ((((size)&0x07) == 0) ? (size) : ((size) + 0x08 - ((size)&0x07)))
-#define CM_ALIGN16(size) ((((size)&0x0F) == 0) ? (size) : ((size) + 0x10 - ((size)&0x0F)))
+#define CM_ALIGN4(size)  ((((size) & 0x03) == 0) ? (size) : ((size) + 0x04 - ((size) & 0x03)))
+#define CM_ALIGN8(size)  ((((size) & 0x07) == 0) ? (size) : ((size) + 0x08 - ((size) & 0x07)))
+#define CM_ALIGN16(size) ((((size) & 0x0F) == 0) ? (size) : ((size) + 0x10 - ((size) & 0x0F)))
 // align to power of 2
-#define CM_CALC_ALIGN(size, align) (((size) + (align)-1) & (~((align)-1)))
-#define CM_CALC_ALIGN_FLOOR(size, align) (((size) -1) & (~((align)-1)))
+#define CM_CALC_ALIGN(size, align) (((size) + (align) - 1) & (~((align) - 1)))
+#define CM_CALC_ALIGN_FLOOR(size, align) (((size) -1) & (~((align) - 1)))
 /* align to any positive integer */
-#define CM_ALIGN_ANY(size, align) (((size) + (align)-1) / (align) * (align))
+#define CM_ALIGN_ANY(size, align) (((size) + (align) - 1) / (align) * (align))
 
-#define CM_ALIGN_CEIL(size, align) (((size) + (align)-1) / (align))
+#define CM_ALIGN_CEIL(size, align) (((size) + (align) - 1) / (align))
 
-#define CM_IS_ALIGN2(size) (((size)&0x01) == 0)
-#define CM_IS_ALIGN4(size) (((size)&0x03) == 0)
-#define CM_IS_ALIGN8(size) (((size)&0x07) == 0)
+#define CM_IS_ALIGN2(size) (((size) & 0x01) == 0)
+#define CM_IS_ALIGN4(size) (((size) & 0x03) == 0)
+#define CM_IS_ALIGN8(size) (((size) & 0x07) == 0)
 
-#define CM_ALIGN16_CEIL(size) ((((size)&0x0F) == 0) ? ((size) + 0x10) : ((size) + 0x10 - ((size)&0x0F)))
-#define CM_ALIGN4_FLOOR(size) ((((size)&0x03) == 0) ? (size) : ((size) - ((size)&0x03)))
+#define CM_ALIGN16_CEIL(size) ((((size) & 0x0F) == 0) ? ((size) + 0x10) : ((size) + 0x10 - ((size) & 0x0F)))
+#define CM_ALIGN4_FLOOR(size) ((((size) & 0x03) == 0) ? (size) : ((size) - ((size) & 0x03)))
 #define CM_ALIGN_8K(size)     (((size) + 0x00001FFF) & 0xFFFFE000)
 
 #define IS_BIG_ENDIAN (*(uint32 *)"\x01\x02\x03\x04" == (uint32)0x01020304)

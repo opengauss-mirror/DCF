@@ -41,7 +41,6 @@
 // include file and define of gittid()
 #ifndef WIN32
 #include <sys/types.h>
-#include <sys/syscall.h>
 #endif
 
 #ifdef __cplusplus
@@ -114,7 +113,7 @@ status_t cm_create_thread(thread_entry_t entry, uint32 stack_size, void *argumen
 void cm_close_thread(thread_t *thread);
 void cm_close_thread_nowait(thread_t *thread);
 
-uint32 cm_get_current_thread_id();
+uint32 cm_get_current_thread_id(void);
 
 void cm_release_thread(thread_t *thread);
 void cm_switch_stack_base(thread_t *thread, char *stack_base, char **org_base);

@@ -57,10 +57,10 @@ static status_t rep_init_impl()
 
 static inline void rep_stop_impl()
 {
-    unregister_msg_process(MEC_CMD_APPEND_LOG_RPC_REQ);
-    unregister_msg_process(MEC_CMD_APPEND_LOG_RPC_ACK);
     rep_leader_deinit();
     rep_common_deinit();
+    unregister_msg_process(MEC_CMD_APPEND_LOG_RPC_REQ);
+    unregister_msg_process(MEC_CMD_APPEND_LOG_RPC_ACK);
 }
 
 status_t rep_init()

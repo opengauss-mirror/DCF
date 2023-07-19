@@ -75,6 +75,9 @@ typedef struct st_param_item {
     param_val_type_t val_type;
 } param_item_t;
 
+static uint32 g_majority_groups[CM_MAX_GROUP_COUNT] = { 0 };
+static uint32 g_majority_group_count = 0;
+
 static param_item_t g_parameters[] = {
     // ------------------------      name  setdefaultvalue  verify    is_dynamic    range
     [DCF_PARAM_ELECTION_TIMEOUT] = {"ELECTION_TIMEOUT", {.value_elc_timeout = CM_DEFAULT_ELC_TIMEOUT},
@@ -159,8 +162,10 @@ static param_item_t g_parameters[] = {
          CM_TRUE, "[0,+]", PARAM_UINT32},
     [DCF_PARAM_DN_FLOW_CONTROL_RPO] = {"DN_FLOW_CONTROL_RPO", {.dn_flow_control_rpo = 0}, verify_param_int_common,
         CM_TRUE, "[0,+]", PARAM_UINT32},
-    [DCF_PARAM_LOG_SUPPRESS_ENABLE] = {"LOG_SUPPRESS_ENABLE", {.log_suppress_enable = 1},
-        verify_param_log_suppress_enable, CM_TRUE, "[0,1]", PARAM_UINT32}
+    [DCF_PARAM_LOG_SUPPRESS_ENABLE] = {"LOG_SUPPRESS_ENABLE", {.log_suppress_enable = 0},
+        verify_param_log_suppress_enable, CM_TRUE, "[0,1]", PARAM_UINT32},
+    [DCF_PARAM_MAJORITY_GROUPS] = {"MAJORITY_GROUPS", {.majority_groups=""},
+        verify_param_majority_groups, CM_FALSE, "valid group value", PARAM_STRING},
 };
 
 status_t get_param(dcf_param_t param_type, param_value_t *param_value)
@@ -252,6 +257,7 @@ status_t verify_param_value(const char *param_name, const char *param_value,
     ret = g_parameters[param_name_id].verify((dcf_param_t) param_name_id, param_value, out_value);
     if (ret != CM_SUCCESS) {
         CM_THROW_ERROR(ERR_PARAMETERS, param_name, param_value);
+        LOG_DEBUG_ERR("[PARAM] verify param_name: %s, param_value: %s", param_name, param_value);
     }
     return ret;
 }
@@ -574,6 +580,77 @@ status_t verify_param_log_suppress_enable(dcf_param_t param_type, const char *pa
     return CM_SUCCESS;
 }
 
+static status_t set_majority_groups(const char *majority_groups_str)
+{
+    if (CM_IS_EMPTY_STR(majority_groups_str)) {
+        g_majority_group_count = 0;
+        return CM_SUCCESS;
+    }
+    text_t text, left, right;
+    uint32 group;
+    cm_str2text((char *)majority_groups_str, &text);
+    uint32 idx = 0;
+    while (text.len != 0) {
+        cm_split_text(&text, ',', 0, &left, &right);
+        CM_RETURN_IFERR(cm_text2uint32(&left, &group));
+        g_majority_groups[idx] = group;
+        idx++;
+        text = right;
+    }
+    g_majority_group_count = idx;
+    return CM_SUCCESS;
+}
+
+status_t check_majority_groups_valid(const char *majority_groups_str)
+{
+    status_t ret;
+    text_t left, right;
+    uint32 group_value;
+    uint32 groups[CM_MAX_NODE_COUNT] = {0};
+    if (CM_IS_EMPTY_STR(majority_groups_str)) {
+        return CM_SUCCESS;
+    }
+    text_t text = {.str = (char *)majority_groups_str, .len = strlen(majority_groups_str)};
+    uint32 count = 0;
+    while (text.len != 0) {
+        cm_split_text(&text, ',', 0, &left, &right);
+        ret = cm_text2uint32(&left, &group_value);
+        if (ret == CM_ERROR) {
+            LOG_DEBUG_ERR("[PARAM] group value in majority groups contain none number value");
+            return CM_ERROR;
+        }
+        groups[count++] = group_value;
+        text = right;
+    }
+    for (int i = 0; i < count; i++) {
+        for (int j = i + 1; j < count; j++) {
+            if (groups[i] == groups[j]) {
+                LOG_DEBUG_ERR("[PARAM] group value in majority groups conflict %u", groups[i]);
+                return CM_ERROR;
+            }
+        }
+    }
+    return CM_SUCCESS;
+}
+
+status_t verify_param_majority_groups(dcf_param_t param_type, const char *param_value, param_value_t *out_value)
+{
+    status_t ret = check_majority_groups_valid(param_value);
+    if (ret != CM_SUCCESS) {
+        LOG_DEBUG_ERR("[PARAM] config majority groups str is invalid %s", param_value);
+        return CM_ERROR;
+    }
+    errno_t errcode = strncpy_s(out_value->majority_groups, MAX_MAJORITY_GROUPS_STR_LEN, (const char *) param_value,
+        strlen((const char *) param_value));
+    ret = errcode == EOK ? CM_SUCCESS : CM_ERROR;
+    if (ret == CM_SUCCESS) {
+        CM_RETURN_IFERR(set_majority_groups(param_value));
+        LOG_RUN_INF("[PARAM] set majority groups value %s success", out_value->majority_groups);
+    }
+
+    return ret;
+}
+
 status_t verify_param_int_filename_format(dcf_param_t param_type, const char *param_value, param_value_t *out_value)
 {
     if (parse_and_check_int_range(param_type, param_value, 0, LOG_FILENAME_UNKNOW - 1, &out_value->v_uint32)) {
@@ -691,6 +768,19 @@ status_t verify_param_password(dcf_param_t param_type, const char *param_value, 
         return CM_ERROR;
     }
     return cm_encrypt_pwd((uchar *) param_value, (uint32) strlen(param_value), &out_value->inter_pwd);
+}
+
+status_t get_param_magority_groups(uint32 groups[CM_MAX_GROUP_COUNT], uint32 *count)
+{
+    *count = g_majority_group_count;
+    if (g_majority_group_count == 0) {
+        return CM_SUCCESS;
+    }
+
+    for (int i = 0; i < g_majority_group_count; i++) {
+        groups[i] = g_majority_groups[i];
+    }
+    return CM_SUCCESS;
 }
 
 #ifdef __cplusplus

@@ -497,8 +497,8 @@ static inline void lex_back_text(lex_t *lex, lang_text_t *text)
     }
 }
 
-#define LEX_SAVE(lex)    lang_text_t __text__ = *(lex)->curr_text;
-#define LEX_RESTORE(lex) *(lex)->curr_text = __text__;
+#define LEX_SAVE(lex)    lang_text_t __text__ = *(lex)->curr_text
+#define LEX_RESTORE(lex) *(lex)->curr_text = __text__
 
 /**
 * Try to fetch tuple with n continuous words.

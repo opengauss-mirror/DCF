@@ -134,7 +134,7 @@ static status_t read_disk_delay(const char *log_path, monitor_status_t *monitor_
             break;
         }
     }
-    fclose(fp);
+    (void)fclose(fp);
 
     return CM_SUCCESS;
 }

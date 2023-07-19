@@ -599,14 +599,24 @@ status_t dtc_decompress_batch_core(compress_t *compress_ctx, mec_message_head_t 
 status_t dtc_proc_batch_core(mec_context_t *mec_ctx, fragment_ctx_t *fragment_ctx, mec_message_head_t *head)
 {
     int32 batch_size = head->batch_size;
+    uint32 remain_size = (uint32)(head->size - sizeof(mec_message_head_t));
     CM_ASSERT(batch_size > 1);
 
+    msg_priv_t head_priv = CS_PRIV_LOW(head->flags) ? PRIV_LOW : PRIV_HIGH;
     mec_message_head_t *temp_head = head + 1;
     while (batch_size > 0) {
         CM_ASSERT(!CS_COMPRESS(temp_head->flags));
+        msg_priv_t cur_priv = CS_PRIV_LOW(temp_head->flags) ? PRIV_LOW : PRIV_HIGH;
+        if (cur_priv != head_priv || remain_size < temp_head->size
+            || remain_size < (uint32)sizeof(mec_message_head_t)) {
+            LOG_DEBUG_ERR("[MEC]batchc err: cur_priv %u, head_priv %u, cur_size %u, remain_size %u, src %u",
+                cur_priv, head_priv, temp_head->size, remain_size, head->src_inst);
+            return CM_ERROR;
+        }
         dtc_recv_proc(mec_ctx, fragment_ctx, temp_head);
         temp_head = (mec_message_head_t *)((char *)temp_head + temp_head->size);
         batch_size--;
+        remain_size -= temp_head->size;
     }
     return CM_SUCCESS;
 }
@@ -614,6 +624,7 @@ status_t dtc_decompress_batch(compress_t *compress_ctx, mec_context_t *mec_ctx,
                               fragment_ctx_t *fragment_ctx, mec_message_head_t *head)
 {
     int32 batch_size = head->batch_size;
+    msg_priv_t head_priv = CS_PRIV_LOW(head->flags) ? PRIV_LOW : PRIV_HIGH;
     CM_ASSERT(batch_size > 1);
     char *inbuf = compress_ctx->in_buf;
     size_t inbuf_capcity = compress_ctx->in_buf_capcity;
@@ -633,6 +644,12 @@ status_t dtc_decompress_batch(compress_t *compress_ctx, mec_context_t *mec_ctx,
             return CM_ERROR;
         }
         g_mec_perf_stat.decompress += g_timer()->now - time2;
+        msg_priv_t cur_priv = CS_PRIV_LOW(head->flags) ? PRIV_LOW : PRIV_HIGH;
+        if (cur_priv != head_priv) {
+            LOG_DEBUG_ERR("[MEC]dec err:cur_priv %u not equal with head_priv %u, src %u",
+                cur_priv, head_priv, head->src_inst);
+            return CM_ERROR;
+        }
         dtc_recv_proc(mec_ctx, fragment_ctx, head);
 
         temp_head = (mec_message_head_t *)((char *)temp_head + temp_head->size);
@@ -806,9 +823,6 @@ void dtc_recv_proc(mec_context_t *mec_ctx, fragment_ctx_t *fragment_ctx, mec_mes
                   "cmd[%u], flag[%u], stream id[%u], serial no[%u], batch size[%u], frag no[%u]",
                   head->size, head->src_inst, head->dst_inst, head->cmd,
                   head->flags, head->stream_id, head->serial_no, head->batch_size, head->frag_no);
-#ifdef DB_MEC_DUMP
-    cm_dump_mem(head, head->size);
-#endif
 
     head->time2 = g_timer()->now;
     g_mec_perf_stat.recv_count++;
@@ -827,11 +841,8 @@ void dtc_recv_proc(mec_context_t *mec_ctx, fragment_ctx_t *fragment_ctx, mec_mes
             int32 code = 0;
             const char *message = NULL;
             cm_get_error(&code, &message);
-            LOG_DEBUG_WAR("[MEC]proc message src inst[%d], dst inst[%d], cmd[%u], "
-                          "stream id[%u], serial no[%u], batch size[%u], frag no[%u] failed, err code %d, err msg %s",
-                          pack.head->src_inst, pack.head->dst_inst, pack.head->cmd, pack.head->stream_id,
-                          pack.head->serial_no, pack.head->batch_size, pack.head->frag_no,
-                          code, code == 0 ? "N/A" : message);
+            LOG_DEBUG_WAR("[MEC]proc message failed,src[%d],dst[%d],cmd[%u],stream id[%u],err code %d, err msg %s",
+                head->src_inst, head->dst_inst, head->cmd, head->stream_id, code, code == 0 ? "N/A" : message);
         }
     }
 }

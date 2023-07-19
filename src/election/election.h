@@ -62,6 +62,8 @@ status_t elc_promote_leader(uint32 stream_id, uint32 node_id);
 status_t elc_set_work_mode(uint32 stream_id, dcf_work_mode_t work_mode, uint32 vote_num);
 dcf_work_mode_t elc_get_work_mode(uint32 stream_id);
 status_t elc_get_quorum(uint32 stream_id, uint32* quorum);
+status_t elc_set_hb_timeout(uint32 stream_id, timespec_t time);
+status_t elc_set_hb_ack_timeout(uint32 stream_id, uint32 node_id, timespec_t time);
 
 #define I_AM_LEADER(stream_id) (elc_get_node_role(stream_id) == DCF_ROLE_LEADER)
 #define I_AM_FOLLOWER(stream_id) \
