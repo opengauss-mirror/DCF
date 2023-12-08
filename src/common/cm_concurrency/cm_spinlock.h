@@ -63,7 +63,7 @@ typedef struct st_spin_statis {
     uint64 fails;
 } spin_statis_t;
 
-#if defined(__arm__) || defined(__aarch64__)
+#if defined(__arm__) || defined(__aarch64__) || defined(__loongarch__)
 #define fas_cpu_pause()          \
     {                            \
         __asm__ volatile("nop"); \

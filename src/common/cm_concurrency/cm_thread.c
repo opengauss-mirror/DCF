@@ -296,6 +296,9 @@ uint32 cm_get_current_thread_id(void)
 #define __SYS_GET_SPID 186
 #elif (defined __aarch64__)
 #define __SYS_GET_SPID 178
+#elif (defined __loongarch__)
+#include<sys/syscall.h>
+#define __SYS_GET_SPID SYS_gettid
 #endif
 #define gettid() syscall(__SYS_GET_SPID)
 
