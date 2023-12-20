@@ -38,7 +38,7 @@
 #define CM_HAVE_SSE4_2
 #include <intrin.h>
 #define CM_HAVE__CPUID
-#else
+#elif defined(__i386__) || defined(__x86_64__)
 #include <nmmintrin.h>
 #define CM_HAVE_SSE4_2
 #include <cpuid.h>
