@@ -520,4 +520,3 @@ void print_state()
         }
     }
 }
-
