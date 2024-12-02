@@ -20,6 +20,8 @@
 支持以下操作系统：
 -   CentOS 7.6（x86）
 -   openEuler-20.03-LTS<br>
+-   openEuler-22.03-LTS<br>
+-   openEuler-24.03-LTS<br>
 适配其他系统，可参照openGauss数据库编译指导<br>
 当前DCF依赖第三方软件有securec、lz4、zstd、openssl、cjson;
 编译dcf依赖的第三方软件要求与编译opengauss对依赖的第三方软件要求一致。
