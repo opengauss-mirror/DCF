@@ -153,9 +153,12 @@ uint32 mec_get_send_que_count(msg_priv_t priv);
 uint32 mec_get_recv_que_count(msg_priv_t priv);
 int64 mec_get_send_mem_capacity(msg_priv_t priv);
 int64 mec_get_recv_mem_capacity(msg_priv_t priv);
+bool32 mec_check_one_connect(uint32 inst_id);
 bool32 mec_check_all_connect();
 bool32 mec_is_ready(uint32 stream_id, uint32 dst_inst, msg_priv_t priv);
 status_t mec_get_peer_version(uint32 stream_id, uint32 dst_inst, uint32 *peer_version);
+bool32 mec_is_diff_endian(uint32 stream_id, uint32 dst_inst);
+
 static inline uint32 mec_get_recv_pack_version(const mec_message_t *pack)
 {
     return pack->head->version;
