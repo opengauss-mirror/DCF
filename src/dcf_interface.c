@@ -280,11 +280,9 @@ static void exception_thread_entry(thread_t *thread)
 {
     dcf_exception_report_t *cur_exception  = (dcf_exception_report_t *)thread->argument;
     (void)cm_set_thread_name("exception reporting thread");
-    bool32 is_triggered = CM_FALSE;
     while (!thread->closed) {
         (void)cm_event_timedwait(&(cur_exception->exception_event), CM_SLEEP_1000_FIXED);
-        if (cur_exception->exception != DCF_RUNNING_NORMAL && is_triggered == CM_FALSE) {
-            is_triggered = CM_TRUE;
+        if (cur_exception->exception != DCF_RUNNING_NORMAL) {
             if (g_cb_exception_notify != NULL) {
                 int ret = g_cb_exception_notify(cur_exception->stream_id, (uint32) (cur_exception->exception));
                 LOG_DEBUG_INF("exception report callback: g_cb_exception_notify, retcode=%d", ret);
