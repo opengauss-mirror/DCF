@@ -59,6 +59,8 @@ typedef struct st_stream {
     stg_meta_t      stg_meta;
     log_storage_t   log_storage;
     entry_cache_t   entry_cache;
+    uint64          boot_last_index;
+    bool32          has_received;
 } stream_t;
 
 void disk_thread_entry(thread_t *thread);

@@ -61,6 +61,10 @@ typedef enum en_dcf_commit_index_type {
     DCF_INDEX_LEVEL_CEIL,
 } dcf_commit_index_type_t;
 
+#define DCF_MAX_PAUSE_TIME              ((unsigned int)(-1))
+#define DCF_MIN_PAUSE_TIME              0
+#define DCF_MAX_NORMAL_USE_PAUSE_TIME   1000000U  // 1 second
+
 /*
     param_name: The parameter types are as follows
     "ELECTION_TIMEOUT"   --unit:ms
@@ -259,6 +263,14 @@ EXPORT_API int dcf_query_stream_info(unsigned int stream_id, char *buffer, unsig
 EXPORT_API int dcf_query_leader_info(unsigned int stream_id, char *ip, unsigned int ip_len, unsigned int *port,
     unsigned int *node_id);
 
+
+/*
+    check if different endian with dest_node
+    * @return = 0    means false, same endian with dest_node
+    * @return != 0   means true, different endian with dest_node
+ */
+EXPORT_API int dcf_is_diff_endian(unsigned int stream_id, unsigned int dest_node_id);
+
 /*
     Get the specific error code of API call
 */
@@ -351,9 +363,9 @@ EXPORT_API int dcf_check_if_all_logs_applied(unsigned int stream_id, unsigned in
 EXPORT_API int dcf_set_trace_key(unsigned long long trace_key);
 
 /*
-    Internal Invocation
+    Set dcf exception type, usually set DCF_RUNNING_NORMAL
 */
-void dcf_set_exception(int stream_id, dcf_exception_t exception);
+EXPORT_API void dcf_set_exception(unsigned int stream_id, dcf_exception_t exception);
 
 /**
 * send msg
@@ -431,6 +443,13 @@ EXPORT_API int dcf_set_election_priority(unsigned int stream_id, unsigned long l
 * @return void
 */
 EXPORT_API void dcf_set_timer(void *timer);
+
+/*
+    get current dcf node connection status between dest dcf node
+    * @return != 0      means error, disconnected
+    * @return = 0       means success, connection ok
+*/
+EXPORT_API int dcf_get_conn_status(unsigned int stream_id, unsigned int dest_node_id);
 
 #ifdef __cplusplus
 }
