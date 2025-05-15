@@ -34,10 +34,11 @@ typedef struct st_rep_follower_state_t {
     uint64              last_ack_time;
     uint64              leader_term;
     uint64              leader_last_index;
+    bool32              has_received;
 }rep_follower_state_t;
 
 // follower state
-rep_follower_state_t  g_follower_state[CM_MAX_STREAM_COUNT];
+rep_follower_state_t  g_follower_state[CM_MAX_STREAM_COUNT] = {0};
 
 #define LEADER_COMMIT_IDX (g_follower_state[stream_id].leader_commit_log)
 #define LEADER_LAST_IDX (g_follower_state[stream_id].leader_last_index)
