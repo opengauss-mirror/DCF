@@ -280,11 +280,9 @@ static void exception_thread_entry(thread_t *thread)
 {
     dcf_exception_report_t *cur_exception  = (dcf_exception_report_t *)thread->argument;
     (void)cm_set_thread_name("exception reporting thread");
-    bool32 is_triggered = CM_FALSE;
     while (!thread->closed) {
         (void)cm_event_timedwait(&(cur_exception->exception_event), CM_SLEEP_1000_FIXED);
-        if (cur_exception->exception != DCF_RUNNING_NORMAL && is_triggered == CM_FALSE) {
-            is_triggered = CM_TRUE;
+        if (cur_exception->exception != DCF_RUNNING_NORMAL) {
             if (g_cb_exception_notify != NULL) {
                 int ret = g_cb_exception_notify(cur_exception->stream_id, (uint32) (cur_exception->exception));
                 LOG_DEBUG_INF("exception report callback: g_cb_exception_notify, retcode=%d", ret);
@@ -1810,9 +1808,9 @@ int dcf_check_if_all_logs_applied(unsigned int stream_id, unsigned int *all_appl
 /*
     Internal Invocation
 */
-void dcf_set_exception(int stream_id, dcf_exception_t exception)
+void dcf_set_exception(unsigned int stream_id, dcf_exception_t exception)
 {
-    g_dcf_exception.stream_id = (uint32)stream_id;
+    g_dcf_exception.stream_id = stream_id;
     g_dcf_exception.exception = exception;
 }
 
@@ -1889,7 +1887,6 @@ int dcf_broadcast_msg(unsigned int stream_id, const char* msg, unsigned int msg_
     return CM_SUCCESS;
 }
 
-#define DCF_PAUSE_TIME 1000000
 /*
     Suspend replication log for this node
 */
@@ -1901,7 +1898,7 @@ int dcf_pause_rep(unsigned int stream_id, unsigned int node_id, unsigned int tim
         return CM_ERROR;
     }
     LOG_OPER("dcf set pausing time for replication, stream_id=%u node_id=%d time_us=%u", stream_id, node_id, time_us);
-    if (time_us > DCF_PAUSE_TIME) {
+    if (time_us != DCF_MAX_PAUSE_TIME && time_us > DCF_MAX_NORMAL_USE_PAUSE_TIME) {
         LOG_DEBUG_ERR("time_us %u is greater than 1000000.", time_us);
         return CM_ERROR;
     }
@@ -2308,6 +2305,38 @@ extern const char *dcf_get_version();
 void dcf_set_timer(void *timer)
 {
     cm_set_timer((gs_timer_t *)timer);
+}
+
+int dcf_is_diff_endian(unsigned int stream_id, unsigned int dest_node_id)
+{
+    cm_reset_error();
+    return (int)mec_is_diff_endian(stream_id, dest_node_id);
+}
+
+int dcf_get_conn_status(unsigned int stream_id, unsigned int dest_node_id)
+{
+    uint32 count;
+    uint32 node_list[CM_MAX_NODE_COUNT];
+    uint32 node_id;
+    uint32 dest_node;
+    cm_reset_error();
+
+    if (md_get_cur_node() == dest_node_id) {
+        return CM_SUCCESS;
+    }
+    
+    CM_RETURN_IFERR(md_get_stream_nodes(stream_id, node_list, &count));
+    dest_node = dest_node_id;
+
+    for (uint32 i = 0; i < count; i++) {
+        node_id = node_list[i];
+        if (node_id == dest_node) {
+            status_t ret = mec_check_one_connect(node_id) ? CM_SUCCESS : CM_ERROR;
+            LOG_DEBUG_INF("check connect to dest node: %u, ret:%d", dest_node, ret);
+            return ret;
+        }
+    }
+    return CM_ERROR;
 }
 
 #ifdef __cplusplus

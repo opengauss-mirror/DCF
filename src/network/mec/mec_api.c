@@ -641,11 +641,31 @@ status_t mec_get_peer_version(uint32 stream_id, uint32 dst_inst, uint32 *peer_ve
     uint32 channel_id = MEC_STREAM_TO_CHANNEL_ID(stream_id, profile->channel_num);
     mec_channel_t *channel = &mec_ctx->channels[dst_inst][channel_id];
     if (channel == NULL) {
-        LOG_DEBUG_ERR("[MEC]null channel or peer_version, stream_id %u, dst_inst %u", stream_id, dst_inst);
+        LOG_DEBUG_ERR("[MEC] null channel or peer_version, stream_id %u, dst_inst %u", stream_id, dst_inst);
         return CM_ERROR;
     }
     *peer_version = channel->pipe[PRIV_HIGH].send_pipe.version;
     return CM_SUCCESS;
+}
+
+bool32 mec_is_diff_endian(uint32 stream_id, uint32 dst_inst)
+{
+    mec_context_t *mec_ctx = get_mec_ctx();
+    mec_profile_t *profile = get_mec_profile();
+    uint32 channel_id = MEC_STREAM_TO_CHANNEL_ID(stream_id, profile->channel_num);
+    mec_channel_t *channel = &mec_ctx->channels[dst_inst][channel_id];
+    if (channel == NULL) {
+        LOG_DEBUG_ERR("[MEC] null channel, stream_id %u, dst_inst %u", stream_id, dst_inst);
+        return CM_FALSE;
+    }
+    uint32 low_options = channel->pipe[PRIV_LOW].send_pipe.options;
+    uint32 hig_options = channel->pipe[PRIV_HIGH].send_pipe.options;
+    if (CS_DIFFERENT_ENDIAN(low_options) || CS_DIFFERENT_ENDIAN(hig_options)) {
+        LOG_RUN_INF("[MEC] diff endian, stream_id %u, dst_inst %u, low_options %u, hig_options %u",
+            stream_id, dst_inst, low_options, hig_options);
+        return CM_TRUE;
+    }
+    return CM_FALSE;
 }
 
 #ifdef __cplusplus

@@ -50,6 +50,8 @@ extern "C" {
 #define CM_INVALID_STREAM_ID 0
 #define CM_INVALID_TERM_ID   0
 #define CM_INVALID_INDEX_ID  0
+#define CM_INVALID_MIN_KEY   0
+#define CM_INVALID_MAX_KEY   ((uint64)(-1))
 #define CM_MAX_ELC_INIT_WAIT_TIMES (20)
 
 #define CM_MD_MISMATCH_REP_INTERVAL 5000 // ms

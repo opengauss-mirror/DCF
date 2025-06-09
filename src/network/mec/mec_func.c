@@ -335,7 +335,7 @@ status_t mec_discard_recv_msg(mec_pipe_t *pipe)
         return CM_ERROR;
     }
 
-    LOG_DEBUG_WAR("[MEC]discard the message, msg len[%u], src inst[%d], dst inst[%d], "
+    LOG_DEBUG_ERR("[MEC]discard the message, msg len[%u], src inst[%d], dst inst[%d], "
                   "cmd[%u], flag[%u], stream id[%u], serial no[%u], batch size[%u], frag no[%u].",
                   pack.head->size, pack.head->src_inst, pack.head->dst_inst, pack.head->cmd,
                   pack.head->flags, pack.head->stream_id, pack.head->serial_no, pack.head->batch_size,

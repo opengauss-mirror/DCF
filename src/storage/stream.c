@@ -173,6 +173,8 @@ status_t load_stream(stream_t *stream)
     stream->last_term  = stream->log_storage.last_term;
     stream->last_index  = stream->log_storage.last_index;
     stream->entry_cache.begin_index = stream->last_index + 1;
+    stream->boot_last_index = stream->last_index;
+    stream->has_received = CM_FALSE;
     return CM_SUCCESS;
 }
 
@@ -195,19 +197,32 @@ static inline void stream_trunc_cache_suffix(entry_cache_t *cache, uint64 last_i
     stream_clear_entry_cache(cache, begin, last_index);
 }
 
-static inline status_t stream_trunc_suffix(stream_t *stream, uint64 last_index_kept, uint64 term)
+static inline status_t stream_trunc_suffix(stream_t *stream, uint64 last_index_kept, uint64 term, bool8 check_apply)
 {
-    LOG_DEBUG_INF("[STG]truncate suffix conflict id (%llu, %llu)", term, last_index_kept + 1);
-    if (stream->applied_index > last_index_kept) {
+    LOG_RUN_INF("[STG]truncate suffix conflict id (%llu, %llu)", term, last_index_kept + 1);
+    cm_spin_lock(&stream->lock, NULL);
+    if (check_apply && stream->applied_index > last_index_kept) {
         cm_spin_unlock(&stream->lock);
-        LOG_DEBUG_ERR("[STG]Can not truncate index which has been applied");
+        LOG_RUN_ERR("[STG]Can not truncate index which has been applied %llu", stream->applied_index);
+        return CM_ERROR;
+    }
+    uint64 old_last_index = stream->last_index;
+    if (last_index_kept >= old_last_index) {
+        cm_spin_unlock(&stream->lock);
+        LOG_RUN_ERR("[STG] no need truncate, last_index_dept=%llu not less than old_last_index=%llu",
+            last_index_kept, old_last_index);
         return CM_SUCCESS;
     }
     stream->last_term = term;
-    uint64 old_last_index = stream->last_index;
-    stream->last_index = last_index_kept + 1;
+    stream->last_index = last_index_kept;
     cm_spin_unlock(&stream->lock);
     stream_trunc_cache_suffix(&stream->entry_cache, last_index_kept, old_last_index);
+    uint64 old_last_disk_index = storage_get_last_id(&stream->log_storage).index;
+    if (last_index_kept >= old_last_disk_index) {
+        LOG_RUN_ERR("[STG] no need truncate, last_index_dept=%llu not less than old_last_disk_index=%llu",
+            last_index_kept, old_last_disk_index);
+        return CM_SUCCESS;
+    }
     return storage_trunc_suffix(&stream->log_storage, last_index_kept, term);
 }
 
@@ -239,7 +254,7 @@ static status_t stream_check_conflict(stream_t *stream, uint64 index, uint64 ter
     // check conflict log index with leader term
     if (term != stream_get_term(stream, index)) {
         // stream lock will be unlocked in this function
-        return stream_trunc_suffix(stream, index - 1, term);
+        return stream_trunc_suffix(stream, index - 1, term, CM_TRUE);
     }
     cm_spin_unlock(&stream->lock);
     // duplicate index which already appended
