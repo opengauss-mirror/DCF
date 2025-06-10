@@ -112,7 +112,6 @@ export DCF_LIBRARYS=$(pwd)/../../../library
 [ -d "${DCF_LIBRARYS}" ] && rm -rf ${DCF_LIBRARYS}
 mkdir -p $DCF_LIBRARYS/huawei_security
 mkdir -p $DCF_LIBRARYS/openssl
-mkdir -p $DCF_LIBRARYS/lz4
 mkdir -p $DCF_LIBRARYS/zstd
 mkdir -p $DCF_LIBRARYS/cJSON
 
@@ -122,13 +121,11 @@ export P_LIB_PATH=$binarylib_dir/kernel/platform/
 cp -r $P_LIB_PATH/Huawei_Secure_C/comm/lib     $DCF_LIBRARYS/huawei_security/lib
 cp -r $LIB_PATH/openssl/comm/lib                  $DCF_LIBRARYS/openssl/lib
 cp -r $LIB_PATH/zstd/lib                          $DCF_LIBRARYS/zstd/lib
-cp -r $LIB_PATH/lz4/comm/lib                      $DCF_LIBRARYS/lz4/lib
 cp -r $LIB_PATH/cjson/comm/lib                    $DCF_LIBRARYS/cJSON/lib
 
 cp -r $P_LIB_PATH/Huawei_Secure_C/comm/include    $DCF_LIBRARYS/huawei_security/include
 cp -r $LIB_PATH/openssl/comm/include              $DCF_LIBRARYS/openssl/include
 cp -r $LIB_PATH/zstd/include                      $DCF_LIBRARYS/zstd/include
-cp -r $LIB_PATH/lz4/comm/include                  $DCF_LIBRARYS/lz4/include
 cp -r $LIB_PATH/cjson/comm/include/cjson          $DCF_LIBRARYS/cJSON/include
 
 cd $PACKAGE
