@@ -932,7 +932,7 @@ status_t lex_try_fetch_rbrackets(lex_t *lex, word_t *word, bool32 *result)
 {
     status_t ret;
     ret = lex_try_fetch_brackets(lex, word, ROUND_BRACKETS, result);
-    if (result) {
+    if (*result) {
         lex_remove_brackets(&word->text, ROUND_BRACKETS);
     }
     return ret;
@@ -942,7 +942,7 @@ status_t lex_try_fetch_sbrackets(lex_t *lex, word_t *word, bool32 *result)
 {
     status_t ret;
     ret = lex_try_fetch_brackets(lex, word, SQUARE_BRACKETS, result);
-    if (result) {
+    if (*result) {
         lex_remove_brackets(&word->text, SQUARE_BRACKETS);
     }
     return ret;
@@ -952,7 +952,7 @@ status_t lex_try_fetch_cbrackets(lex_t *lex, word_t *word, bool32 *result)
 {
     status_t ret;
     ret = lex_try_fetch_brackets(lex, word, CURLY_BRACKETS, result);
-    if (result) {
+    if (*result) {
         lex_remove_brackets(&word->text, CURLY_BRACKETS);
     }
     return ret;
