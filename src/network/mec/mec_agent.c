@@ -278,8 +278,10 @@ status_t try_attach_agent(mec_pipe_t *pipe, agent_pool_t *agent_pool, attach_mod
 
         if (node != NULL) {
             *agent = OBJECT_OF(agent_t, node);
-            bind_channel_agent(pipe, mode, *agent);
-            return CM_SUCCESS;
+            if (*agent != NULL) {
+                bind_channel_agent(pipe, mode, *agent);
+                return CM_SUCCESS;
+            }
         }
     }
 
