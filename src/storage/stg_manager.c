@@ -363,6 +363,14 @@ uint64 stg_last_index(uint32 stream_id)
     return stream_last_index(&g_streams[stream_id]);
 }
 
+void stg_align_last_index_with_storage(uint32 stream_id)
+{
+    stream_t *stream = &g_streams[stream_id];
+    cm_spin_lock(&stream->lock, NULL);
+    stream_align_last_index_with_storage(stream);
+    cm_spin_unlock(&stream->lock);
+}
+
 log_id_t stg_last_log_id(uint32 stream_id)
 {
     return stream_last_log_id(&g_streams[stream_id], CM_FALSE);
