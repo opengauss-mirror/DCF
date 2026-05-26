@@ -119,6 +119,9 @@ uint64 stg_first_index(uint32 stream_id);
 // get index of the last log entry
 uint64 stg_last_index(uint32 stream_id);
 
+// align in-memory last_index with on-disk tail before leader append
+void stg_align_last_index_with_storage(uint32 stream_id);
+
 // get log id of the last log entry
 log_id_t stg_last_log_id(uint32 stream_id);
 
