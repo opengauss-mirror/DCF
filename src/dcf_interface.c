@@ -836,6 +836,11 @@ int dcf_start(unsigned int node_id, const char *cfg_str)
     }
     init_dcf_errno_desc();
     cm_reset_error();
+    if (memchr(cfg_str, '\0', (size_t)CM_MAX_STREAMS_CFG_STR_LEN + 1) == NULL) {
+        CM_THROW_ERROR_EX(ERR_PARSE_CFG_STR, "cfg_str exceeds max length %u", CM_MAX_STREAMS_CFG_STR_LEN);
+        cm_unlatch(&g_dcf_latch, NULL);
+        return CM_ERROR;
+    }
 
     do {
         status_t ret = init_main_threads(node_id, cfg_str);

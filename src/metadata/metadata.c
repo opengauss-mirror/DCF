@@ -324,6 +324,12 @@ status_t md_init(uint32 node_id, const char* cfg_str)
     bool32 is_exists = CM_FALSE;
     CM_RETURN_IFERR(get_store_stream(&g_metadata, &is_exists));
     if (is_exists == CM_FALSE) {
+        CM_CHECK_NULL_PTR(cfg_str);
+        if (memchr(cfg_str, '\0', (size_t)CM_MAX_STREAMS_CFG_STR_LEN + 1) == NULL) {
+            LOG_RUN_ERR("[META] cfg_str is too long, max_len=%u.", CM_MAX_STREAMS_CFG_STR_LEN);
+            return CM_ERROR;
+        }
+
         dcf_streams_t* streams = new_streams();
         if (streams == NULL) {
             LOG_RUN_ERR("[META]init metadata stream failed");
