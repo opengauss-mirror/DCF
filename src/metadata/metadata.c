@@ -23,6 +23,7 @@
  */
 
 #include "metadata.h"
+#include <string.h>
 #include "cm_text.h"
 #include "cm_num.h"
 #include "cm_latch.h"
@@ -259,6 +260,12 @@ static status_t parse_change_member_single(const cJSON* stream, uint32 *stream_i
 status_t parse_change_member_str(const char *change_str, uint32 *stream_id, uint32 *node_id,
     dcf_change_member_t *change_info)
 {
+    CM_CHECK_NULL_PTR(change_str);
+    if (memchr(change_str, '\0', (size_t)CM_MAX_CHANGE_MEMBER_STR_LEN + 1) == NULL) {
+        LOG_DEBUG_ERR("[META] change_str is too long, max_len=%u.", CM_MAX_CHANGE_MEMBER_STR_LEN);
+        return CM_ERROR;
+    }
+
     cJSON *stream_list = cJSON_Parse(change_str);
     CM_RETURN_IF_FALSE_EX(cJSON_IsArray(stream_list), cJSON_Delete(stream_list));
 

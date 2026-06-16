@@ -80,6 +80,7 @@ extern "C" {
 
 #define CM_METADATA_DEF_MAX_LEN (100 * (CM_MAX_NODE_PER_STREAM) * (CM_MAX_STREAM_COUNT))
 #define CM_MAX_CHAR_ARRAY_LEN 256
+#define CM_MAX_CHANGE_MEMBER_STR_LEN SIZE_K(4)
 
 #define MD_GET_STREAM(streams, stream_id) ((dcf_stream_t *)cm_ptlist_get(&(streams)->stream_list, (stream_id)))
 #define MD_GET_STREAM_NODE(stream, node_id) ((dcf_node_t *)cm_ptlist_get(&(stream)->node_list, (node_id)))

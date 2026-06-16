@@ -23,6 +23,7 @@
  */
 
 #include "interface/dcf_interface.h"
+#include <string.h>
 #include "cm_defs.h"
 #include "util_error.h"
 #include "cm_types.h"
@@ -1546,6 +1547,10 @@ int dcf_change_member(const char *change_str, unsigned int wait_timeout_ms)
 
     cm_reset_error();
     CM_CHECK_NULL_PTR(change_str);
+    if (memchr(change_str, '\0', (size_t)CM_MAX_CHANGE_MEMBER_STR_LEN + 1) == NULL) {
+        LOG_DEBUG_ERR("change_str is too long, max_len=%u.", CM_MAX_CHANGE_MEMBER_STR_LEN);
+        return CM_ERROR;
+    }
     LOG_OPER("dcf change member, change_str=%s wait_timeout_ms=%u", change_str, wait_timeout_ms);
 
     CM_RETURN_IFERR(parse_change_member_str(change_str, &stream_id, &node_id, &change_info));
