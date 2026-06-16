@@ -2387,6 +2387,11 @@ void dcf_set_timer(void *timer)
 int dcf_is_diff_endian(unsigned int stream_id, unsigned int dest_node_id)
 {
     cm_reset_error();
+    CM_RETURN_IF_FALSE(check_if_node_inited(stream_id));
+    if (dest_node_id == CM_INVALID_NODE_ID || dest_node_id >= CM_MAX_NODE_COUNT) {
+        LOG_DEBUG_ERR("invalid dest_node_id %u.", dest_node_id);
+        return CM_ERROR;
+    }
     return (int)mec_is_diff_endian(stream_id, dest_node_id);
 }
 

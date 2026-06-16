@@ -652,12 +652,22 @@ bool32 mec_is_diff_endian(uint32 stream_id, uint32 dst_inst)
 {
     mec_context_t *mec_ctx = get_mec_ctx();
     mec_profile_t *profile = get_mec_profile();
+    if (dst_inst == CM_INVALID_NODE_ID || dst_inst >= CM_MAX_NODE_COUNT) {
+        LOG_DEBUG_ERR("[MEC] invalid dst_inst %u, stream_id %u", dst_inst, stream_id);
+        return CM_FALSE;
+    }
+    if (mec_ctx->channels == NULL || profile->channel_num == 0) {
+        LOG_DEBUG_ERR("[MEC] channel table is not ready, stream_id %u, dst_inst %u", stream_id, dst_inst);
+        return CM_FALSE;
+    }
+
     uint32 channel_id = MEC_STREAM_TO_CHANNEL_ID(stream_id, profile->channel_num);
-    mec_channel_t *channel = &mec_ctx->channels[dst_inst][channel_id];
-    if (channel == NULL) {
+    mec_channel_t *channel_row = mec_ctx->channels[dst_inst];
+    if (channel_row == NULL) {
         LOG_DEBUG_ERR("[MEC] null channel, stream_id %u, dst_inst %u", stream_id, dst_inst);
         return CM_FALSE;
     }
+    mec_channel_t *channel = &channel_row[channel_id];
     uint32 low_options = channel->pipe[PRIV_LOW].send_pipe.options;
     uint32 hig_options = channel->pipe[PRIV_HIGH].send_pipe.options;
     if (CS_DIFFERENT_ENDIAN(low_options) || CS_DIFFERENT_ENDIAN(hig_options)) {
