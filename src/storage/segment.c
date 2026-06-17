@@ -23,11 +23,14 @@
  */
 
 #include "segment.h"
+#include <limits.h>
 #include "cm_list.h"
 #include "cm_text.h"
 #include "stream.h"
 #include "cm_checksum.h"
 #include "util_profile_stat.h"
+
+#define STG_MAX_ENTRY_DATA_SIZE ((uint64)INT_MAX - ENTRY_HEAD_SIZE)
 
 status_t switch_segment_to(segment_t *segment, bool32 to_open)
 {
@@ -61,6 +64,11 @@ status_t load_log_entry(int32 fd, int64 offset, char *buf, uint32 size, entry_he
     int32 read_size;
 
     size = MAX(size, ENTRY_HEAD_SIZE);
+    if (size > INT_MAX) {
+        LOG_DEBUG_ERR("[STG]Log entry read size is invalid at offset:%lld, size:%u", offset, size);
+        *is_valid = CM_FALSE;
+        return CM_SUCCESS;
+    }
     CM_RETURN_IFERR(cm_pread_file(fd, buf, size, offset, &read_size));
     *is_valid = read_size != size ? CM_FALSE : CM_TRUE;
     if (!(*is_valid)) {
@@ -75,6 +83,13 @@ status_t load_log_entry(int32 fd, int64 offset, char *buf, uint32 size, entry_he
     }
 
     if (size == ENTRY_HEAD_SIZE) {
+        return CM_SUCCESS;
+    }
+
+    if (head->size != size - ENTRY_HEAD_SIZE) {
+        LOG_DEBUG_ERR("[STG]Log entry size mismatch at offset:%lld, head size:%u, read size:%u",
+            offset, head->size, size);
+        *is_valid = CM_FALSE;
         return CM_SUCCESS;
     }
 
@@ -116,8 +131,12 @@ static status_t load_index(segment_t *segment)
         if (!is_valid) { // The last log was not completely written, which should be truncated
             break;
         }
-        int64 skip_len = entry_head.size + ENTRY_HEAD_SIZE;
-        if (entry_off + skip_len > scan_size) {
+        if (entry_head.size > STG_MAX_ENTRY_DATA_SIZE) {
+            LOG_DEBUG_ERR("[STG]Invalid log entry size %u at offset:%lld", entry_head.size, entry_off);
+            return CM_ERROR;
+        }
+        uint64 skip_len = (uint64)entry_head.size + ENTRY_HEAD_SIZE;
+        if (skip_len > (uint64)scan_size - (uint64)entry_off) {
             // The last log was not completely written and it should be truncated
             break;
         }
@@ -126,7 +145,7 @@ static status_t load_index(segment_t *segment)
         log_index.offset = (uint64)entry_off;
         CM_RETURN_IFERR(index_buf_add(&segment->indexes, &log_index));
         ++last_index;
-        entry_off += skip_len;
+        entry_off += (int64)skip_len;
     }
 
     if (segment->is_open) {
@@ -193,15 +212,30 @@ static status_t segment_get_log_meta(segment_t *segment, uint64 index, log_meta_
 
     meta->term   = curr.term;
     meta->offset = curr.offset;
+    uint64 entry_size;
     if (index < segment->last_index) {
         if (index_buf_get(&segment->indexes, curr_idx + 1, &next) != CM_SUCCESS) {
             cm_unlatch(&segment->latch, NULL);
             return CM_ERROR;
         }
-        meta->size = (uint32)((next.offset - curr.offset) - ENTRY_HEAD_SIZE);
+        if (next.offset < curr.offset + ENTRY_HEAD_SIZE) {
+            cm_unlatch(&segment->latch, NULL);
+            return CM_ERROR;
+        }
+        entry_size = next.offset - curr.offset - ENTRY_HEAD_SIZE;
     } else {
-        meta->size = (uint32)((segment->size - curr.offset) - ENTRY_HEAD_SIZE);
+        if (segment->size < curr.offset + ENTRY_HEAD_SIZE) {
+            cm_unlatch(&segment->latch, NULL);
+            return CM_ERROR;
+        }
+        entry_size = segment->size - curr.offset - ENTRY_HEAD_SIZE;
     }
+    if (entry_size > STG_MAX_ENTRY_DATA_SIZE) {
+        LOG_DEBUG_ERR("[STG]Invalid log entry size %llu at offset:%llu", entry_size, curr.offset);
+        cm_unlatch(&segment->latch, NULL);
+        return CM_ERROR;
+    }
+    meta->size = (uint32)entry_size;
     cm_unlatch(&segment->latch, NULL);
     return CM_SUCCESS;
 }
@@ -213,7 +247,16 @@ log_entry_t* segment_get_entry(segment_t *segment, uint64 index, mem_pool_t *poo
         return NULL;
     }
 
-    uint32 total_size = sizeof(log_entry_t) + ENTRY_HEAD_SIZE + meta.size;
+    /*
+     * segment_get_log_meta() caps meta.size so io_size fits cm_pread_file's int size.
+     * Check the entry wrapper before keeping the allocation length in uint32.
+     */
+    uint32 io_size = meta.size + ENTRY_HEAD_SIZE;
+    if ((uint64)io_size + sizeof(log_entry_t) > CM_MAX_UINT32) {
+        LOG_DEBUG_ERR("[STG]segment_get_entry size overflow, index:%llu, size:%u", index, meta.size);
+        return NULL;
+    }
+    uint32 total_size = io_size + (uint32)sizeof(log_entry_t);
     log_entry_t *entry = (log_entry_t*)galloc(total_size, pool);
     if (entry == NULL) {
         LOG_DEBUG_ERR("[STG]segment_get_entry alloc entry failed");
@@ -227,9 +270,9 @@ log_entry_t* segment_get_entry(segment_t *segment, uint64 index, mem_pool_t *poo
 
     bool32 is_valid = CM_TRUE;
     char  *io_buf   = entry->data;
-    uint32 io_size  = meta.size + ENTRY_HEAD_SIZE;
     entry_head_t entry_head;
-    if (load_log_entry(segment->fd, meta.offset, io_buf, io_size, &entry_head, &is_valid) != CM_SUCCESS || !is_valid) {
+    if (load_log_entry(segment->fd, meta.offset, io_buf, io_size, &entry_head, &is_valid) != CM_SUCCESS ||
+        !is_valid) {
         gfree(entry);
         return NULL;
     }
