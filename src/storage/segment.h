@@ -55,6 +55,7 @@ typedef struct st_segment {
     uint64        first_index;
     uint64        last_index;
     uint64        size;
+    uint64        max_size;
     latch_t       latch;
     bool32        valid;
     bool32        is_open;
