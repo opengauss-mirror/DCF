@@ -38,7 +38,8 @@ static inline bool32 is_valid_log_file(const char *file_name, bool32 is_empty)
     return CM_TRUE;
 }
 
-static inline segment_t *alloc_segment(char *home, uint64 first_index, uint64 last_index, bool32 is_open)
+static inline segment_t *alloc_segment(char *home, uint64 first_index, uint64 last_index,
+                                       uint64 max_size, bool32 is_open)
 {
     segment_t *segment = (segment_t *)malloc(sizeof(segment_t));
     if (segment == NULL) {
@@ -49,6 +50,7 @@ static inline segment_t *alloc_segment(char *home, uint64 first_index, uint64 la
     segment->fd          = -1;
     segment->home        = home;
     segment->size        = 0;
+    segment->max_size    = max_size;
     segment->valid       = CM_TRUE;
     segment->is_open     = is_open;
     segment->ref_count   = 0;
@@ -69,7 +71,8 @@ static inline segment_t *create_open_segment(log_storage_t *storage)
         return NULL;
     }
 
-    segment_t *segment = alloc_segment(storage->home, storage->last_index + 1, storage->last_index, CM_TRUE);
+    segment_t *segment = alloc_segment(storage->home, storage->last_index + 1, storage->last_index,
+                                       storage->segment_size, CM_TRUE);
     if (segment == NULL) {
         LOG_DEBUG_ERR("[STG]create_open_segment alloc_segment failed");
         return NULL;
@@ -127,7 +130,7 @@ static status_t load_segment(log_storage_t *storage, char *file_name, bool32 is_
     segment_t *segment = NULL;
     int match = sscanf_s(file_name, STG_CLOSE_PATTERN, &first_index, &last_index);
     if (match == 2) {
-        segment = alloc_segment(storage->home, first_index, last_index, CM_FALSE);
+        segment = alloc_segment(storage->home, first_index, last_index, storage->segment_size, CM_FALSE);
         if (segment == NULL) {
             return CM_ERROR;
         }
@@ -149,7 +152,7 @@ static status_t load_segment(log_storage_t *storage, char *file_name, bool32 is_
         return CM_ERROR;
     }
 
-    storage->open_segment = alloc_segment(storage->home, first_index, first_index - 1, CM_TRUE);
+    storage->open_segment = alloc_segment(storage->home, first_index, first_index - 1, storage->segment_size, CM_TRUE);
     return storage->open_segment == NULL ? CM_ERROR : CM_SUCCESS;
 }
 

@@ -98,17 +98,26 @@ static status_t load_index(segment_t *segment)
     bool32 is_valid   = CM_TRUE;
     uint64 last_index = segment->first_index - 1;
     int64  file_size  = cm_file_size(segment->fd);
+    if (file_size < 0) {
+        LOG_DEBUG_ERR("[STG]Get segment file size failed");
+        return CM_ERROR;
+    }
+    int64 scan_size = file_size;
+    if (segment->max_size > 0 && (uint64)file_size > segment->max_size) {
+        LOG_DEBUG_ERR("[STG]Segment file size %lld exceeds limit %llu", file_size, segment->max_size);
+        scan_size = (int64)segment->max_size;
+    }
 
     entry_head_t entry_head;
     char  head_buf[ENTRY_HEAD_SIZE];
 
-    for (int64 i = segment->first_index; entry_off < file_size; i++) {
+    for (int64 i = segment->first_index; entry_off < scan_size; i++) {
         CM_RETURN_IFERR(load_log_entry(segment->fd, entry_off, head_buf, ENTRY_HEAD_SIZE, &entry_head, &is_valid));
         if (!is_valid) { // The last log was not completely written, which should be truncated
             break;
         }
         int64 skip_len = entry_head.size + ENTRY_HEAD_SIZE;
-        if (entry_off + skip_len > file_size) {
+        if (entry_off + skip_len > scan_size) {
             // The last log was not completely written and it should be truncated
             break;
         }
