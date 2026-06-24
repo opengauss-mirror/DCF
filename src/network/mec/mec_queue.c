@@ -605,59 +605,101 @@ status_t dtc_proc_batch_core(mec_context_t *mec_ctx, fragment_ctx_t *fragment_ct
     msg_priv_t head_priv = CS_PRIV_LOW(head->flags) ? PRIV_LOW : PRIV_HIGH;
     mec_message_head_t *temp_head = head + 1;
     while (batch_size > 0) {
+        uint32 cur_size;
+        if (remain_size < (uint32)sizeof(mec_message_head_t)) {
+            LOG_DEBUG_ERR("[MEC]batchc err: head_size %u, remain_size %u, batch_size %d, src %u",
+                head->size, remain_size, batch_size, head->src_inst);
+            return CM_ERROR;
+        }
         CM_ASSERT(!CS_COMPRESS(temp_head->flags));
+        cur_size = temp_head->size;
         msg_priv_t cur_priv = CS_PRIV_LOW(temp_head->flags) ? PRIV_LOW : PRIV_HIGH;
-        if (cur_priv != head_priv || remain_size < temp_head->size
-            || remain_size < (uint32)sizeof(mec_message_head_t)) {
+        if (cur_priv != head_priv || cur_size < (uint32)sizeof(mec_message_head_t) || remain_size < cur_size) {
             LOG_DEBUG_ERR("[MEC]batchc err: cur_priv %u, head_priv %u, cur_size %u, remain_size %u, src %u",
-                cur_priv, head_priv, temp_head->size, remain_size, head->src_inst);
+                cur_priv, head_priv, cur_size, remain_size, head->src_inst);
             return CM_ERROR;
         }
         dtc_recv_proc(mec_ctx, fragment_ctx, temp_head);
-        temp_head = (mec_message_head_t *)((char *)temp_head + temp_head->size);
+        remain_size -= cur_size;
+        temp_head = (mec_message_head_t *)((char *)temp_head + cur_size);
         batch_size--;
-        remain_size -= temp_head->size;
     }
     return CM_SUCCESS;
 }
+
+static void dtc_decompress_restore_inbuf(compress_t *compress_ctx, char *inbuf, size_t inbuf_capcity)
+{
+    compress_ctx->in_buf = inbuf;
+    compress_ctx->in_buf_capcity = inbuf_capcity;
+}
+
+static status_t dtc_decompress_batch_one(compress_t *compress_ctx, mec_context_t *mec_ctx,
+    fragment_ctx_t *fragment_ctx, mec_message_head_t *head, msg_priv_t head_priv,
+    mec_message_head_t **temp_head, uint32 *remain_size, int32 *batch_size, char *inbuf,
+    size_t inbuf_capcity)
+{
+    uint32 cur_size;
+
+    if (*remain_size < (uint32)sizeof(mec_message_head_t)) {
+        LOG_DEBUG_ERR("[MEC]dec err: head_size %u, remain_size %u, batch_size %d, src %u",
+            head->size, *remain_size, *batch_size, head->src_inst);
+        dtc_decompress_restore_inbuf(compress_ctx, inbuf, inbuf_capcity);
+        return CM_ERROR;
+    }
+    cur_size = (*temp_head)->size;
+    if (cur_size < (uint32)sizeof(mec_message_head_t) || *remain_size < cur_size) {
+        LOG_DEBUG_ERR("[MEC]dec err: cur_size %u, remain_size %u, src %u",
+            cur_size, *remain_size, head->src_inst);
+        dtc_decompress_restore_inbuf(compress_ctx, inbuf, inbuf_capcity);
+        return CM_ERROR;
+    }
+    *head = **temp_head;
+    date_t time2 = g_timer()->now;
+    if (dtc_decompress_batch_core(compress_ctx, *temp_head, head) != CM_SUCCESS) {
+        dtc_decompress_restore_inbuf(compress_ctx, inbuf, inbuf_capcity);
+        return CM_ERROR;
+    }
+    g_mec_perf_stat.decompress += g_timer()->now - time2;
+    msg_priv_t cur_priv = CS_PRIV_LOW(head->flags) ? PRIV_LOW : PRIV_HIGH;
+    if (cur_priv != head_priv) {
+        LOG_DEBUG_ERR("[MEC]dec err:cur_priv %u not equal with head_priv %u, src %u",
+            cur_priv, head_priv, head->src_inst);
+        dtc_decompress_restore_inbuf(compress_ctx, inbuf, inbuf_capcity);
+        return CM_ERROR;
+    }
+    dtc_recv_proc(mec_ctx, fragment_ctx, head);
+    *remain_size -= cur_size;
+    *temp_head = (mec_message_head_t *)((char *)(*temp_head) + cur_size);
+    (*batch_size)--;
+    return CM_SUCCESS;
+}
+
 status_t dtc_decompress_batch(compress_t *compress_ctx, mec_context_t *mec_ctx,
                               fragment_ctx_t *fragment_ctx, mec_message_head_t *head)
 {
     int32 batch_size = head->batch_size;
     msg_priv_t head_priv = CS_PRIV_LOW(head->flags) ? PRIV_LOW : PRIV_HIGH;
-    CM_ASSERT(batch_size > 1);
     char *inbuf = compress_ctx->in_buf;
     size_t inbuf_capcity = compress_ctx->in_buf_capcity;
+    uint32 remain_size;
+    mec_message_head_t *temp_head;
+    errno_t ret;
+
+    CM_ASSERT(batch_size > 1);
     CM_ASSERT(compress_ctx->in_buf_capcity >= head->size - sizeof(mec_message_head_t));
-    errno_t ret = memcpy_sp(inbuf, inbuf_capcity, (char *)(head + 1), head->size - sizeof(mec_message_head_t));
+    ret = memcpy_sp(inbuf, inbuf_capcity, (char *)(head + 1), head->size - sizeof(mec_message_head_t));
     if (ret != EOK) {
         CM_THROW_ERROR(ERR_SYSTEM_CALL, ret);
         return CM_ERROR;
     }
-    mec_message_head_t *temp_head = (mec_message_head_t *)inbuf;
+    remain_size = (uint32)(head->size - sizeof(mec_message_head_t));
+    temp_head = (mec_message_head_t *)inbuf;
     while (batch_size > 0) {
-        *head = *temp_head;
-        date_t time2 = g_timer()->now;
-        if (dtc_decompress_batch_core(compress_ctx, (mec_message_head_t *)temp_head, head) != CM_SUCCESS) {
-            compress_ctx->in_buf = inbuf;
-            compress_ctx->in_buf_capcity = inbuf_capcity;
-            return CM_ERROR;
-        }
-        g_mec_perf_stat.decompress += g_timer()->now - time2;
-        msg_priv_t cur_priv = CS_PRIV_LOW(head->flags) ? PRIV_LOW : PRIV_HIGH;
-        if (cur_priv != head_priv) {
-            LOG_DEBUG_ERR("[MEC]dec err:cur_priv %u not equal with head_priv %u, src %u",
-                cur_priv, head_priv, head->src_inst);
-            return CM_ERROR;
-        }
-        dtc_recv_proc(mec_ctx, fragment_ctx, head);
-
-        temp_head = (mec_message_head_t *)((char *)temp_head + temp_head->size);
-        batch_size--;
+        CM_RETURN_IFERR(dtc_decompress_batch_one(compress_ctx, mec_ctx, fragment_ctx, head, head_priv,
+            &temp_head, &remain_size, &batch_size, inbuf, inbuf_capcity));
     }
 
-    compress_ctx->in_buf = inbuf;
-    compress_ctx->in_buf_capcity = inbuf_capcity;
+    dtc_decompress_restore_inbuf(compress_ctx, inbuf, inbuf_capcity);
     return CM_SUCCESS;
 }
 
