@@ -104,9 +104,24 @@ static status_t md_read_file(const char *file, char **buf, int32 *size, bool32 *
 
     CM_RETURN_IFERR(cm_open_file(file, O_RDWR | O_BINARY, &fd));
 
-    int32 file_size = (int32)cm_file_size(fd);
-    if ((uint32)file_size <= DCF_METADATA_HEAD_SIZE) {
+    int64 file_size = cm_file_size(fd);
+    if (file_size < 0) {
         cm_close_file(fd);
+        LOG_RUN_ERR("[META]get metadata file %s size failed", file);
+        return CM_ERROR;
+    }
+
+    if (file_size <= DCF_METADATA_HEAD_SIZE) {
+        cm_close_file(fd);
+        return CM_SUCCESS;
+    }
+
+    if (file_size - DCF_METADATA_HEAD_SIZE > CM_METADATA_DEF_MAX_LEN) {
+        cm_close_file(fd);
+        *buf = NULL;
+        *size = 0;
+        *is_valid = CM_FALSE;
+        LOG_RUN_ERR("[META]metadata file %s is too large", file);
         return CM_SUCCESS;
     }
 
@@ -117,7 +132,7 @@ static status_t md_read_file(const char *file, char **buf, int32 *size, bool32 *
         return CM_ERROR;
     }
 
-    *size = file_size - DCF_METADATA_HEAD_SIZE;
+    *size = (int32)(file_size - DCF_METADATA_HEAD_SIZE);
     *buf = (char*)malloc(*size);
     if (*buf == NULL) {
         cm_close_file(fd);
