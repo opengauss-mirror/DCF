@@ -86,6 +86,8 @@ log_id_t stream_last_log_id(stream_t *stream, bool32 flush);
 
 status_t stream_trunc_prefix(stream_t *stream, uint64 first_index_kept);
 
+void stream_align_last_index_with_storage(stream_t *stream);
+
 static inline status_t stream_set_applied_index(stream_t *stream, uint64 applied_index)
 {
     stream->applied_index = applied_index;
@@ -135,6 +137,8 @@ static inline uint64 stream_last_index(const stream_t *stream)
 #define ENTRY_CACHE_SIZE         1000000
 #define ENTRY_CACHE_RECYCLE_STEP 128
 #define ENTRY_CACHE_THRESHOLD    (3 * ENTRY_CACHE_SIZE / 4)
+/* wait cycles (50ms each) before force-releasing a zombie cache slot */
+#define ENTRY_CACHE_ZOMBIE_FORCE_RELEASE_WAIT  60
 
 #ifdef __cplusplus
 }

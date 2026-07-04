@@ -87,12 +87,46 @@ static inline void stream_add_entry_cache(entry_cache_t *entry_cache, uint64 ind
 {
     uint32 slot = index % entry_cache->size;
     log_entry_t *entry = &entry_cache->entrys[slot];
+    uint32 wait_times = 0;
 
     cm_latch_x(&entry->latch, 0, NULL);
     while (entry->data != NULL) {
         cm_unlatch(&entry->latch, NULL);
         (void)cm_event_timedwait(&entry_cache->event, CM_SLEEP_50_FIXED);
         cm_latch_x(&entry->latch, 0, NULL);
+        wait_times++;
+
+        if (entry->data == NULL) {
+            break;
+        }
+
+        uint64 old_index = ENTRY_INDEX(entry);
+        uint64 old_term = ENTRY_TERM(entry);
+        int32 ref_count = entry->ref_count;
+        bool8 valid = entry->valid;
+
+        if (wait_times % ENTRY_CACHE_ZOMBIE_FORCE_RELEASE_WAIT == 0) {
+            LOG_RUN_WAR("[STG]stream_add_entry_cache still waiting: target_index=%llu slot=%u old_index=%llu "
+                "old_term=%llu valid=%u ref_count=%d wait_times=%u begin_index=%llu.",
+                index, slot, old_index, old_term, (uint32)valid, ref_count, wait_times, entry_cache->begin_index);
+        }
+
+        /* After enough waits, force release zombie slot (valid=1, ref_count=0, same index). */
+        if (wait_times >= ENTRY_CACHE_ZOMBIE_FORCE_RELEASE_WAIT &&
+            ref_count == 0 && valid && old_index == index) {
+            LOG_RUN_WAR("[STG]stream_add_entry_cache force release zombie entry: target_index=%llu slot=%u "
+                "old_term=%llu wait_times=%u begin_index=%llu.",
+                index, slot, old_term, wait_times, entry_cache->begin_index);
+            entry->valid = CM_FALSE;
+            cm_unlatch(&entry->latch, NULL);
+            free_log_entry(entry);
+            cm_latch_x(&entry->latch, 0, NULL);
+            continue;
+        }
+    }
+    if (wait_times > 0) {
+        LOG_RUN_INF("[STG]stream_add_entry_cache wait done: target_index=%llu slot=%u wait_times=%u.",
+            index, slot, wait_times);
     }
     CM_ASSERT(entry->valid == 0);
     CM_ASSERT(entry->ref_count == 0);
@@ -247,17 +281,30 @@ static status_t stream_check_conflict(stream_t *stream, uint64 index, uint64 ter
     if (index == stream->last_index + 1) {
         stream->last_term  = term;
         stream->last_index = index;
+        if (index <= stream->log_storage.last_index) {
+            LOG_RUN_WAR("[STG]stream_check_conflict contiguous append but index already on disk: stream_id=%u "
+                "index=%llu term=%llu last_disk_index=%llu applied_index=%llu cache_begin_index=%llu.",
+                stream->id, index, term, stream->log_storage.last_index, stream->applied_index,
+                stream->entry_cache.begin_index);
+        }
         cm_spin_unlock(&stream->lock);
         return CM_SUCCESS;
     }
 
+    cm_spin_unlock(&stream->lock);
     // check conflict log index with leader term
     if (term != stream_get_term(stream, index)) {
+        LOG_RUN_WAR("[STG]stream_check_conflict term mismatch, will truncate: stream_id=%u index=%llu term=%llu "
+            "local_term=%llu last_index=%llu applied_index=%llu.",
+            stream->id, index, term, stream_get_term(stream, index), stream->last_index, stream->applied_index);
         // stream lock will be unlocked in this function
         return stream_trunc_suffix(stream, index - 1, term, CM_TRUE);
     }
-    cm_spin_unlock(&stream->lock);
     // duplicate index which already appended
+    LOG_RUN_WAR("[STG]stream_check_conflict duplicate index ignored: stream_id=%u index=%llu term=%llu "
+        "last_index=%llu last_disk_index=%llu applied_index=%llu cache_begin_index=%llu.",
+        stream->id, index, term, stream->last_index, stream->log_storage.last_index, stream->applied_index,
+        stream->entry_cache.begin_index);
     *ignore = CM_TRUE;
     return CM_SUCCESS;
 }
@@ -343,12 +390,33 @@ static inline void fill_entry_head(uint64 term, uint64 index,
     calc_entry_chksum(buf, data, size);
 }
 
+void stream_align_last_index_with_storage(stream_t *stream)
+{
+    uint64 disk_index = stream->log_storage.last_index;
+    if (stream->last_index >= disk_index) {
+        return;
+    }
+    LOG_RUN_WAR("[STG]stream_align_last_index: stream_id=%u last_index %llu -> disk %llu "
+        "applied_index=%llu cache_begin_index=%llu.",
+        stream->id, stream->last_index, disk_index, stream->applied_index, stream->entry_cache.begin_index);
+    stream->last_index = disk_index;
+    stream->last_term = stream->log_storage.last_term;
+}
+
 static inline void stream_alloc_index(stream_t *stream, uint64 *index, uint64 term)
 {
     cm_spin_lock(&stream->lock, NULL);
+    stream_align_last_index_with_storage(stream);
+    uint64 old_last_index = stream->last_index;
     *index = ++stream->last_index;
     ps_start1(*index);
     stream->last_term = term;
+    if (*index <= stream->log_storage.last_index) {
+        LOG_RUN_WAR("[STG]stream_alloc_index possible duplicate index: stream_id=%u old_last_index=%llu new_index=%llu "
+            "last_disk_index=%llu applied_index=%llu cache_begin_index=%llu.",
+            stream->id, old_last_index, *index, stream->log_storage.last_index, stream->applied_index,
+            stream->entry_cache.begin_index);
+    }
     cm_spin_unlock(&stream->lock);
 }
 
@@ -356,6 +424,14 @@ status_t stream_append_entry(stream_t *stream, uint64 term, uint64 *index,
     char *data, uint32 size, uint64 key, entry_type_t type)
 {
     char *buf = NULL;
+    uint64 req_index = *index;
+    bool8 is_conf = (type == ENTRY_TYPE_CONF);
+    if (is_conf) {
+        LOG_RUN_INF("[STG]stream_append_entry conf begin: stream_id=%u req_index=%llu term=%llu size=%u key=%llu "
+            "last_index=%llu last_disk_index=%llu applied_index=%llu cache_begin_index=%llu.",
+            stream->id, req_index, term, size, key, stream->last_index, stream->log_storage.last_index,
+            stream->applied_index, stream->entry_cache.begin_index);
+    }
     CM_RETURN_IFERR(alloc_entry_buf(stream, data, size, &buf));
 
     if (*index == CM_INVALID_INDEX_ID) { // leader
@@ -377,6 +453,12 @@ status_t stream_append_entry(stream_t *stream, uint64 term, uint64 *index,
 
     // add to entry cache
     stream_add_entry_cache(&stream->entry_cache, *index, buf);
+    if (is_conf) {
+        LOG_RUN_INF("[STG]stream_append_entry conf cached: stream_id=%u alloc_index=%llu term=%llu "
+            "last_index=%llu last_disk_index=%llu applied_index=%llu cache_begin_index=%llu.",
+            stream->id, *index, term, stream->last_index, stream->log_storage.last_index, stream->applied_index,
+            stream->entry_cache.begin_index);
+    }
 
     // notify disk thread
     cm_event_notify(stream->disk_event);
@@ -560,11 +642,20 @@ static inline bool32 if_exceed_mem_threshold(mem_pool_t *mem_pool)
 
 static inline void stream_recycle_internal(stream_t *stream)
 {
+    entry_cache_t *cache = &stream->entry_cache;
+
     while (CM_TRUE) {
-        if (!if_exceed_cache_threshold(stream) && !if_exceed_mem_threshold(&stream->mem_pool)) {
+        uint64 recyclable = get_recycle_index(stream);
+        bool32 under_pressure = if_exceed_cache_threshold(stream) || if_exceed_mem_threshold(&stream->mem_pool);
+        bool32 has_recyclable = (cache->begin_index <= recyclable);
+
+        if (!under_pressure && !has_recyclable) {
             break;
         }
         if (!stream_recycle_entrys(stream)) {
+            break;
+        }
+        if (!under_pressure && cache->begin_index > get_recycle_index(stream)) {
             break;
         }
     }
