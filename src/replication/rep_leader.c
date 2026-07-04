@@ -241,18 +241,11 @@ status_t rep_wait_all_logs_applied(uint32 stream_id)
     return CM_SUCCESS;
 }
 
-// called by election when this node becomes leader
-status_t rep_leader_reset(uint32 stream_id)
+static void rep_leader_reset_replica_state(uint32 stream_id, const uint32 *nodes, uint32 count, uint64 last_log_index)
 {
-    uint32 nodes[CM_MAX_NODE_COUNT];
-    uint32 count;
-
-    CM_RETURN_IFERR(md_get_stream_nodes(stream_id, nodes, &count));
-
-    log_id_t last_log = stg_last_log_id(stream_id);
     for (uint32 i = 0; i < count; i++) {
         uint32 node_id = nodes[i];
-        NEXT_INDEX = last_log.index;
+        NEXT_INDEX = last_log_index;
         if (node_id == g_cur_node_id) {
             MATCH_INDEX = stg_last_disk_log_id(stream_id);
         } else {
@@ -263,41 +256,72 @@ status_t rep_leader_reset(uint32 stream_id)
         TRY_REMATCH = CM_FALSE;
         PRE_APPTIME = 0;
         PAUSE_TIME  = 0;
-        LOG_DEBUG_INF("[REP]rep_leader_reset:node_id=%u,next_index=%llu", node_id,
-            NEXT_INDEX);
+        LOG_DEBUG_INF("[REP]rep_leader_reset:node_id=%u,next_index=%llu", node_id, NEXT_INDEX);
     }
+}
 
-    if (I_AM_LEADER(stream_id)) {
-        /* Write matadata when leader reset for:
-        1. try commit previous term's log
-        2. ensure configurations on all nodes are consistent */
-        CM_RETURN_IFERR(md_set_status(META_CATCH_UP));
-        uint32 size;
-        char *md_buf = (char *)malloc(CM_METADATA_DEF_MAX_LEN);
-        if (md_buf == NULL) {
-            LOG_DEBUG_ERR("rep_leader_reset malloc failed");
-            CM_RETURN_IFERR(md_set_status(META_NORMAL));
-            return CM_ERROR;
-        }
-        if (md_to_string(md_buf, CM_METADATA_DEF_MAX_LEN, &size) != CM_SUCCESS) {
-            CM_FREE_PTR(md_buf);
-            CM_RETURN_IFERR(md_set_status(META_NORMAL));
-            return CM_ERROR;
-        }
-        if (rep_write(stream_id, md_buf, size, CFG_LOG_KEY(CM_INVALID_NODE_ID, OP_FLAG_NONE),
-            ENTRY_TYPE_CONF, NULL) != CM_SUCCESS) {
-            CM_FREE_PTR(md_buf);
-            CM_RETURN_IFERR(md_set_status(META_NORMAL));
-            return CM_ERROR;
-        }
+static status_t rep_leader_reset_write_conf(uint32 stream_id)
+{
+    /* Write matadata when leader reset for:
+     * 1. try commit previous term's log
+     * 2. ensure configurations on all nodes are consistent
+     */
+    CM_RETURN_IFERR(md_set_status(META_CATCH_UP));
+    uint32 size;
+    char *md_buf = (char *)malloc(CM_METADATA_DEF_MAX_LEN);
+    if (md_buf == NULL) {
+        LOG_DEBUG_ERR("rep_leader_reset malloc failed");
+        CM_RETURN_IFERR(md_set_status(META_NORMAL));
+        return CM_ERROR;
+    }
+    if (md_to_string(md_buf, CM_METADATA_DEF_MAX_LEN, &size) != CM_SUCCESS) {
         CM_FREE_PTR(md_buf);
         CM_RETURN_IFERR(md_set_status(META_NORMAL));
+        return CM_ERROR;
+    }
+    LOG_RUN_INF("[REP]rep_leader_reset write conf begin: stream_id=%u size=%u key=%llu last_log_index=%llu "
+        "last_disk_index=%llu applied_index=%llu.",
+        stream_id, size, CFG_LOG_KEY(CM_INVALID_NODE_ID, OP_FLAG_NONE), stg_last_log_id(stream_id).index,
+        stg_last_disk_log_id(stream_id).index, stg_get_applied_index(stream_id));
+    stg_align_last_index_with_storage(stream_id);
+    if (rep_write(stream_id, md_buf, size, CFG_LOG_KEY(CM_INVALID_NODE_ID, OP_FLAG_NONE),
+        ENTRY_TYPE_CONF, NULL) != CM_SUCCESS) {
+        CM_FREE_PTR(md_buf);
+        CM_RETURN_IFERR(md_set_status(META_NORMAL));
+        return CM_ERROR;
+    }
+    LOG_RUN_INF("[REP]rep_leader_reset write conf end: stream_id=%u last_log_index=%llu last_disk_index=%llu "
+        "applied_index=%llu.",
+        stream_id, stg_last_log_id(stream_id).index, stg_last_disk_log_id(stream_id).index,
+        stg_get_applied_index(stream_id));
+    CM_FREE_PTR(md_buf);
+    return md_set_status(META_NORMAL);
+}
+
+// called by election when this node becomes leader
+status_t rep_leader_reset(uint32 stream_id)
+{
+    uint32 nodes[CM_MAX_NODE_COUNT];
+    uint32 count;
+
+    CM_RETURN_IFERR(md_get_stream_nodes(stream_id, nodes, &count));
+
+    log_id_t last_log = stg_last_log_id(stream_id);
+    log_id_t last_disk_log = stg_last_disk_log_id(stream_id);
+    uint64 applied_index = stg_get_applied_index(stream_id);
+    LOG_RUN_INF("[REP]rep_leader_reset begin: stream_id=%u leader=%d last_log=(%llu,%llu) last_disk=(%llu,%llu) "
+        "applied_index=%llu node_count=%u.",
+        stream_id, I_AM_LEADER(stream_id), last_log.term, last_log.index, last_disk_log.term, last_disk_log.index,
+        applied_index, count);
+    rep_leader_reset_replica_state(stream_id, nodes, count, last_log.index);
+
+    if (I_AM_LEADER(stream_id)) {
+        CM_RETURN_IFERR(rep_leader_reset_write_conf(stream_id));
     } else {
         LOG_RUN_WAR("rep_leader_reset:I'm not a leader now!");
     }
 
     LOG_RUN_INF("rep_leader_reset finished");
-
     return CM_SUCCESS;
 }
 
