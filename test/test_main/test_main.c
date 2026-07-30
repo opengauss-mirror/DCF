@@ -126,11 +126,6 @@ int main(int argc, char *argv[])
         printf("set param FLOW_CONTROL_DISK_RAWAIT_THRESHOLD fail\n");
     }
 
-    //dcf_set_param("SSL_CA", "/opt/data/huxl/protect/cacert.pem");
-    //dcf_set_param("SSL_KEY", "/opt/data/huxl/protect/server.key");
-    //dcf_set_param("SSL_CERT", "/opt/data/huxl/protect/server.crt");
-    //dcf_set_param("SSL_PWD_PLAINTEXT", "Gauss_234");
-
     if (dcf_register_after_writer(usr_cb_after_writer) !=0) {
         printf("dcf_register_after_writer fail\n");
     }
