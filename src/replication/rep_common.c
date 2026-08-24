@@ -276,6 +276,7 @@ static void rep_apply_thread_entry(thread_t *thread)
             LOG_TIME_BEGIN(rep_apply_proc);
             if (rep_apply_proc(stream_id, &stream_exists_log) != CM_SUCCESS) {
                 LOG_DEBUG_ERR_EX("[REP]rep_apply_proc failed.");
+                cm_sleep(CM_SLEEP_50_FIXED);
             }
             LOG_TIME_END(rep_apply_proc);
 
