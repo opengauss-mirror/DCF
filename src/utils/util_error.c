@@ -76,6 +76,7 @@ static const char *dcf_error_desc[CM_ERROR_COUNT] = {
     [ERR_TERM_IS_EXPIRED]		   = "Term is expired",
     [ERR_APPEN_LOG_REQ_LOST]       = "Append log request is lost",
     [ERR_ROLE_NOT_LEADER]          = "Current node is not leader",
+    [ERR_APPEND_FROM_NON_LEADER]   = "append-log sender is not the elected leader",
     /* storage errors: 700 - 799 */
     [ERR_APPEND_ENTRY_FAILED]     = "Failed to append entry",
     [ERR_INDEX_NOT_CONTIGUOUS]    = "Index is not contiguous",

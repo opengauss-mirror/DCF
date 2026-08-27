@@ -47,6 +47,32 @@ rep_follower_state_t  g_follower_state[CM_MAX_STREAM_COUNT] = {0};
 #define LAST_ACK_IDX (g_follower_state[stream_id].last_ack_log_id)
 #define LAST_ACK_TIME (g_follower_state[stream_id].last_ack_time)
 #define SEND_ACK_RETRY_INTERVAL (1*MICROSECS_PER_SECOND)    // ms
+#define REP_LEADER_AUTH_REJECT_LOG_INTERVAL (10 * MICROSECS_PER_SECOND)
+#define REP_LEADER_AUTH_ACCEPT_LOG_INTERVAL (30 * MICROSECS_PER_SECOND)
+
+/* Throttle DEBUG logs during switchover races / steady replication. */
+static uint64 g_leader_auth_reject_log_last[CM_MAX_STREAM_COUNT] = {0};
+static uint64 g_leader_auth_accept_log_last[CM_MAX_STREAM_COUNT] = {0};
+
+static bool32 rep_leader_auth_reject_log_allow(uint32 stream_id)
+{
+    uint64 now = g_timer()->now;
+    if (now - g_leader_auth_reject_log_last[stream_id] < REP_LEADER_AUTH_REJECT_LOG_INTERVAL) {
+        return CM_FALSE;
+    }
+    g_leader_auth_reject_log_last[stream_id] = now;
+    return CM_TRUE;
+}
+
+static bool32 rep_leader_auth_accept_log_allow(uint32 stream_id)
+{
+    uint64 now = g_timer()->now;
+    if (now - g_leader_auth_accept_log_last[stream_id] < REP_LEADER_AUTH_ACCEPT_LOG_INTERVAL) {
+        return CM_FALSE;
+    }
+    g_leader_auth_accept_log_last[stream_id] = now;
+    return CM_TRUE;
+}
 
 static status_t rep_appendlog_req_proc(mec_message_t *pack);
 
@@ -203,32 +229,99 @@ static void rep_follower_check_log_match(uint32 stream_id, const rep_apendlog_re
     }
 }
 
+/*
+ * Bind transport peer to claimed leader, and to the elected leader for this stream.
+ * DEBUG level: enable via LOG_LEVEL including DEBUG_WAR/DEBUG_INF.
+ */
+static status_t rep_follower_check_leader_auth(uint32 stream_id, const rep_apendlog_req_t *appendlog_req,
+    const mec_message_t *pack, errno_t *error_no)
+{
+    uint32 src_inst = pack->head->src_inst;
+    uint32 votefor = elc_get_votefor(stream_id);
+    uint64 cur_term = elc_get_current_term(stream_id);
+
+    if (votefor == CM_INVALID_NODE_ID || votefor != src_inst) {
+        if (rep_leader_auth_reject_log_allow(stream_id)) {
+            LOG_DEBUG_WAR("[REP][LEADER_AUTH] reject append-log from non-leader, "
+                "stream_id=%u src=%u claimed_leader=%u votefor=%u req_term=%llu cur_term=%llu "
+                "leader_last_index=%llu leader_commit=(%llu,%llu) log_count=%llu",
+                stream_id, src_inst, appendlog_req->leader_node_id, votefor,
+                appendlog_req->leader_term, cur_term, appendlog_req->leader_last_index,
+                appendlog_req->leader_commit_log.term, appendlog_req->leader_commit_log.index,
+                appendlog_req->log_count);
+        }
+        *error_no = ERR_APPEND_FROM_NON_LEADER;
+        return CM_ERROR;
+    }
+
+    return CM_SUCCESS;
+}
+
 static status_t rep_follower_process(uint32 stream_id, rep_apendlog_req_t* appendlog_req, mec_message_t *pack,
     rep_log_t* log0, errno_t* error_no)
 {
     uint64 cur_term = elc_get_current_term(stream_id);
+    uint32 src_inst = pack->head->src_inst;
     *error_no = 0;
 
+    /* Identity binding applies to all append-log requests, including higher-term signals. */
+    if (appendlog_req->leader_node_id != src_inst) {
+        if (rep_leader_auth_reject_log_allow(stream_id)) {
+            LOG_DEBUG_WAR("[REP][LEADER_AUTH] reject append-log identity mismatch, "
+                "stream_id=%u src=%u claimed_leader=%u req_term=%llu cur_term=%llu",
+                stream_id, src_inst, appendlog_req->leader_node_id,
+                appendlog_req->leader_term, cur_term);
+        }
+        *error_no = ERR_APPEND_FROM_NON_LEADER;
+        return CM_ERROR;
+    }
+
     if (appendlog_req->leader_term < cur_term) {
-        LOG_DEBUG_ERR("[REP]leader's term is less than mine.");
+        /* Common after switchover/failover: stale primary still replicates with old term. */
+        if (rep_leader_auth_reject_log_allow(stream_id)) {
+            LOG_DEBUG_WAR("[REP][LEADER_AUTH] reject append-log stale term, "
+                "stream_id=%u src=%u claimed_leader=%u req_term=%llu cur_term=%llu votefor=%u",
+                stream_id, src_inst, appendlog_req->leader_node_id,
+                appendlog_req->leader_term, cur_term, elc_get_votefor(stream_id));
+        }
         *error_no = ERR_TERM_IS_EXPIRED;
         return CM_ERROR;
     } else if (appendlog_req->leader_term > cur_term) {
         if (I_AM_LEADER(stream_id)) {
             (void)elc_judge_term(stream_id, appendlog_req->leader_term);
-            LOG_DEBUG_INF("[REP]another leader's term is greater than mine.[%llu > %llu]",
-                appendlog_req->leader_term, cur_term);
+            LOG_DEBUG_INF("[REP][LEADER_AUTH] higher-term append-log while leader, demote check, "
+                "stream_id=%u src=%u req_term=%llu cur_term=%llu",
+                stream_id, src_inst, appendlog_req->leader_term, cur_term);
         } else {
-            LOG_DEBUG_INF("[REP]leader's term is greater than mine.[%llu > %llu]",
-                appendlog_req->leader_term, cur_term);
+            LOG_DEBUG_INF("[REP][LEADER_AUTH] higher-term append-log, "
+                "stream_id=%u src=%u req_term=%llu cur_term=%llu votefor=%u",
+                stream_id, src_inst, appendlog_req->leader_term, cur_term, elc_get_votefor(stream_id));
         }
 
         return CM_SUCCESS;
     } else {
         if (I_AM_LEADER(stream_id)) {
-            LOG_DEBUG_INF("[REP] I'm leader,can not receive log now.");
+            if (rep_leader_auth_reject_log_allow(stream_id)) {
+                LOG_DEBUG_WAR("[REP][LEADER_AUTH] ignore append-log: local is leader, "
+                    "stream_id=%u src=%u req_term=%llu",
+                    stream_id, src_inst, appendlog_req->leader_term);
+            }
             return CM_SUCCESS;
         }
+    }
+
+    /* Equal-term path mutates follower state: only the elected leader may proceed. */
+    if (rep_follower_check_leader_auth(stream_id, appendlog_req, pack, error_no) != CM_SUCCESS) {
+        return CM_ERROR;
+    }
+
+    /* Skip empty heartbeat accepts; throttle non-empty accepts to avoid flood. */
+    if (appendlog_req->log_count > 0 && rep_leader_auth_accept_log_allow(stream_id)) {
+        LOG_DEBUG_INF("[REP][LEADER_AUTH] accept append-log from elected leader, "
+            "stream_id=%u src=%u req_term=%llu leader_last_index=%llu leader_commit=(%llu,%llu) log_count=%llu",
+            stream_id, src_inst, appendlog_req->leader_term, appendlog_req->leader_last_index,
+            appendlog_req->leader_commit_log.term, appendlog_req->leader_commit_log.index,
+            appendlog_req->log_count);
     }
 
     if (LEADER_TERM != appendlog_req->leader_term) {
