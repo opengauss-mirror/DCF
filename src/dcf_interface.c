@@ -31,6 +31,7 @@
 #include "cm_memory.h"
 #include "cm_text.h"
 #include "cm_num.h"
+#include "cm_cipher.h"
 #include "mec.h"
 #include "metadata.h"
 #include "md_change.h"
@@ -92,13 +93,34 @@ static dcf_exception_report_t       g_dcf_exception;
 static bool32    g_node_inited = CM_FALSE;
 
 #define MAX_PARALLEL_MAX_NUM 256
+#define PARALLEL_REQ_SLOT_MASK ((uint32)(MAX_PARALLEL_MAX_NUM - 1))
+#define PARALLEL_REQ_TOKEN_MASK (~PARALLEL_REQ_SLOT_MASK)
+
+typedef enum en_dcf_parallel_req_status {
+    DCF_PARALLEL_REQ_FREE = 0,
+    DCF_PARALLEL_REQ_RESERVED,
+    DCF_PARALLEL_REQ_WAITING,
+    DCF_PARALLEL_REQ_COMPLETED
+} dcf_parallel_req_status_t;
+
 typedef struct st_dcf_parallel_msg {
     spinlock_t   lock;
     uint32       cursor;
     uint8        req_id_status[MAX_PARALLEL_MAX_NUM];
+    uint32       req_stream_id[MAX_PARALLEL_MAX_NUM];
+    uint32       req_peer_inst[MAX_PARALLEL_MAX_NUM];
+    uint32       req_token[MAX_PARALLEL_MAX_NUM];
     atomic_t     ack_result[MAX_PARALLEL_MAX_NUM];
     cm_event_t   event[MAX_PARALLEL_MAX_NUM];
 } dcf_parallel_msg_t;
+
+typedef struct st_dcf_parallel_req {
+    uint32 slot_id;
+    uint32 stream_id;
+    uint32 peer_inst;
+    uint32 token;
+    uint64 initial_result;
+} dcf_parallel_req_t;
 static dcf_parallel_msg_t  g_universal_write_info = {0};
 static dcf_parallel_msg_t  g_consensus_hc_info = {0};
 
@@ -1944,15 +1966,15 @@ int dcf_demote_follower(unsigned int stream_id)
 
 #define UNIVERSAL_WAIT_TIME_OUT 3000
 
-static uint32 alloc_req_id(dcf_parallel_msg_t* parallel_msg)
+static uint32 alloc_req_id(dcf_parallel_msg_t *parallel_msg)
 {
     uint32 req_id = MAX_PARALLEL_MAX_NUM;
     cm_spin_lock(&parallel_msg->lock, NULL);
-    for (int i = 0; i < MAX_PARALLEL_MAX_NUM; i++) {
+    for (uint32 i = 0; i < MAX_PARALLEL_MAX_NUM; i++) {
         uint32 cur_id = parallel_msg->cursor;
         parallel_msg->cursor = (cur_id + 1) % MAX_PARALLEL_MAX_NUM;
-        if (parallel_msg->req_id_status[cur_id] == 0) {
-            parallel_msg->req_id_status[cur_id] = 1;
+        if (parallel_msg->req_id_status[cur_id] == DCF_PARALLEL_REQ_FREE) {
+            parallel_msg->req_id_status[cur_id] = DCF_PARALLEL_REQ_RESERVED;
             req_id = cur_id;
             break;
         }
@@ -1963,9 +1985,55 @@ static uint32 alloc_req_id(dcf_parallel_msg_t* parallel_msg)
 
 static inline void free_req_id(dcf_parallel_msg_t* parallel_msg, uint32 req_id)
 {
+    if (req_id >= MAX_PARALLEL_MAX_NUM) {
+        return;
+    }
     cm_spin_lock(&parallel_msg->lock, NULL);
-    parallel_msg->req_id_status[req_id] = 0;
+    parallel_msg->req_id_status[req_id] = DCF_PARALLEL_REQ_FREE;
+    parallel_msg->req_token[req_id] = 0;
     cm_spin_unlock(&parallel_msg->lock);
+}
+
+static status_t init_parallel_req(dcf_parallel_msg_t *parallel_msg, dcf_parallel_req_t *req)
+{
+    uint32 token;
+    CM_RETURN_IFERR(cm_rand((uchar *)&token, sizeof(uint32)));
+    token = (token & PARALLEL_REQ_TOKEN_MASK) | req->slot_id;
+    if ((token & PARALLEL_REQ_TOKEN_MASK) == 0) {
+        token |= MAX_PARALLEL_MAX_NUM;
+    }
+
+    status_t ret = CM_ERROR;
+    cm_spin_lock(&parallel_msg->lock, NULL);
+    if (req->slot_id < MAX_PARALLEL_MAX_NUM &&
+        parallel_msg->req_id_status[req->slot_id] == DCF_PARALLEL_REQ_RESERVED) {
+        parallel_msg->req_stream_id[req->slot_id] = req->stream_id;
+        parallel_msg->req_peer_inst[req->slot_id] = req->peer_inst;
+        parallel_msg->req_token[req->slot_id] = token;
+        (void)cm_atomic_set(&parallel_msg->ack_result[req->slot_id], req->initial_result);
+        parallel_msg->req_id_status[req->slot_id] = DCF_PARALLEL_REQ_WAITING;
+        req->token = token;
+        ret = CM_SUCCESS;
+    }
+    cm_spin_unlock(&parallel_msg->lock);
+    return ret;
+}
+
+static status_t complete_parallel_req(dcf_parallel_msg_t *parallel_msg, uint32 req_id, uint32 stream_id,
+    uint32 peer_inst, uint64 result)
+{
+    uint32 slot_id = req_id & PARALLEL_REQ_SLOT_MASK;
+    status_t ret = CM_ERROR;
+    cm_spin_lock(&parallel_msg->lock, NULL);
+    if (parallel_msg->req_id_status[slot_id] == DCF_PARALLEL_REQ_WAITING &&
+        parallel_msg->req_token[slot_id] == req_id &&
+        parallel_msg->req_stream_id[slot_id] == stream_id && parallel_msg->req_peer_inst[slot_id] == peer_inst) {
+        (void)cm_atomic_set(&parallel_msg->ack_result[slot_id], result);
+        parallel_msg->req_id_status[slot_id] = DCF_PARALLEL_REQ_COMPLETED;
+        ret = CM_SUCCESS;
+    }
+    cm_spin_unlock(&parallel_msg->lock);
+    return ret;
 }
 
 static inline uint64 get_commit_index_result(uint32 req_id)
@@ -1973,14 +2041,9 @@ static inline uint64 get_commit_index_result(uint32 req_id)
     return (uint64)cm_atomic_get(&g_consensus_hc_info.ack_result[req_id]);
 }
 
-static inline void set_commit_index_result(uint32 req_id, uint64 result)
+status_t send_fetching_commit_index_remote_req(unsigned int stream_id, uint32 is_consensus, uint32 req_id,
+    uint32 leader_node)
 {
-    (void)cm_atomic_set(&g_consensus_hc_info.ack_result[req_id], result);
-}
-
-status_t send_fetching_commit_index_remote_req(unsigned int stream_id, uint32 is_consensus, uint32 req_id)
-{
-    uint32 leader_node = elc_get_votefor(stream_id);
     if (leader_node == CM_INVALID_NODE_ID) {
         LOG_DEBUG_ERR("[DCF]leader=%d invalid, can't send consensus msg req now.", CM_INVALID_NODE_ID);
         return CM_ERROR;
@@ -1989,7 +2052,8 @@ status_t send_fetching_commit_index_remote_req(unsigned int stream_id, uint32 is
     uint32 src_node = md_get_cur_node();
     mec_message_t pack;
     CM_RETURN_IFERR(mec_alloc_pack(&pack, MEC_CMD_GET_COMMIT_INDEX_REQ, src_node, leader_node, stream_id));
-    if (mec_put_int32(&pack, req_id) != CM_SUCCESS || mec_put_int32(&pack, is_consensus) != CM_SUCCESS) {
+    if (mec_put_int32(&pack, req_id) != CM_SUCCESS ||
+        mec_put_int32(&pack, is_consensus) != CM_SUCCESS) {
         LOG_DEBUG_ERR("[DCF]consensus health-check encode failed, src_node=%u, leader=%u.", src_node, leader_node);
         mec_release_pack(&pack);
         return CM_ERROR;
@@ -2007,34 +2071,28 @@ static inline uint64 get_universal_write_index(uint32 req_id)
     return (uint64)cm_atomic_get(&g_universal_write_info.ack_result[req_id]);
 }
 
-static inline void set_universal_write_index(uint32 req_id, uint64 index)
+status_t send_universal_write_req(const dcf_parallel_req_t *req, const char *buffer, unsigned int length,
+    unsigned long long key)
 {
-    (void)cm_atomic_set(&g_universal_write_info.ack_result[req_id], index);
-}
-
-status_t send_universal_write_req(unsigned int stream_id, const char *buffer, unsigned int length,
-    unsigned long long key, uint32 req_id)
-{
-    uint32 leader = elc_get_votefor(stream_id);
-    if (leader == CM_INVALID_NODE_ID) {
+    if (req->peer_inst == CM_INVALID_NODE_ID) {
         LOG_DEBUG_ERR("[DCF]leader=%d invalid, can't send universal write req now.", CM_INVALID_NODE_ID);
         return CM_ERROR;
     }
 
     uint32 src_node = md_get_cur_node();
     mec_message_t pack;
-    CM_RETURN_IFERR(mec_alloc_pack(&pack, MEC_CMD_UNIVERSAL_WRITE_REQ, src_node, leader, stream_id));
-    if (mec_put_int32(&pack, req_id) != CM_SUCCESS
+    CM_RETURN_IFERR(mec_alloc_pack(&pack, MEC_CMD_UNIVERSAL_WRITE_REQ, src_node, req->peer_inst, req->stream_id));
+    if (mec_put_int32(&pack, req->token) != CM_SUCCESS
         || mec_put_int64(&pack, key) != CM_SUCCESS
         || mec_put_bin(&pack, length, buffer) != CM_SUCCESS) {
-        LOG_DEBUG_ERR("[DCF]universal write encode failed, src_node=%u, leader=%u.", src_node, leader);
+        LOG_DEBUG_ERR("[DCF]universal write encode failed, src_node=%u, leader=%u.", src_node, req->peer_inst);
         mec_release_pack(&pack);
         return CM_ERROR;
     }
     status_t ret = mec_send_data(&pack);
     mec_release_pack(&pack);
     if (ret != CM_SUCCESS) {
-        LOG_DEBUG_ERR("[DCF]send universal write req failed, src_node=%u, leader=%u.", src_node, leader);
+        LOG_DEBUG_ERR("[DCF]send universal write req failed, src_node=%u, leader=%u.", src_node, req->peer_inst);
     }
     return ret;
 }
@@ -2055,34 +2113,41 @@ int dcf_universal_write(unsigned int stream_id, const char *buffer, unsigned int
         return dcf_write(stream_id, buffer, length, key, index);
     }
 
-    uint32 req_id = alloc_req_id(&g_universal_write_info);
-    if (req_id >= MAX_PARALLEL_MAX_NUM) {
-        LOG_DEBUG_ERR("[DCF]req_id=%d invalid, try later.", req_id);
+    uint32 leader = elc_get_votefor(stream_id);
+    if (leader == CM_INVALID_NODE_ID) {
+        LOG_DEBUG_ERR("[DCF]leader=%d invalid, can't send universal write req now.", CM_INVALID_NODE_ID);
         return CM_ERROR;
     }
     uint64 last_write_index = 0;
-    set_universal_write_index(req_id, last_write_index);
-    CM_RETURN_IFERR_EX(send_universal_write_req(stream_id, buffer, length, key, req_id),
-        free_req_id(&g_universal_write_info, req_id));
+    uint32 slot_id = alloc_req_id(&g_universal_write_info);
+    if (slot_id >= MAX_PARALLEL_MAX_NUM) {
+        LOG_DEBUG_ERR("[DCF]req_id=%u invalid, try later.", slot_id);
+        return CM_ERROR;
+    }
+    dcf_parallel_req_t req = { slot_id, stream_id, leader, 0, last_write_index };
+    CM_RETURN_IFERR_EX(init_parallel_req(&g_universal_write_info, &req),
+        free_req_id(&g_universal_write_info, slot_id));
+    CM_RETURN_IFERR_EX(send_universal_write_req(&req, buffer, length, key),
+        free_req_id(&g_universal_write_info, slot_id));
 
     timespec_t begin = cm_clock_now();
     uint64 ack_index;
     while (((uint64)(cm_clock_now() - begin)) / MICROSECS_PER_MILLISEC < UNIVERSAL_WAIT_TIME_OUT) {
-        ack_index = get_universal_write_index(req_id);
+        ack_index = get_universal_write_index(slot_id);
         if (ack_index > last_write_index) {
             LOG_DEBUG_INF("[DCF]universal write succeed, stream_id=%u buflength=%u key=%llu index=%llu req_id=%u",
-                stream_id, length, key, ack_index, req_id);
-            free_req_id(&g_universal_write_info, req_id);
+                stream_id, length, key, ack_index, slot_id);
+            free_req_id(&g_universal_write_info, slot_id);
             if (index != NULL) {
                 *index = ack_index;
             }
             return CM_SUCCESS;
         }
-        (void)cm_event_timedwait(&g_universal_write_info.event[req_id], CM_SLEEP_1_FIXED);
+        (void)cm_event_timedwait(&g_universal_write_info.event[slot_id], CM_SLEEP_1_FIXED);
     }
     LOG_DEBUG_ERR("[DCF]universal write timeout %u ms, stream_id=%u buflength=%u key=%llu index=%llu req_id=%u",
-        UNIVERSAL_WAIT_TIME_OUT, stream_id, length, key, ack_index, req_id);
-    free_req_id(&g_universal_write_info, req_id);
+        UNIVERSAL_WAIT_TIME_OUT, stream_id, length, key, ack_index, slot_id);
+    free_req_id(&g_universal_write_info, slot_id);
     return CM_TIMEDOUT;
 }
 
@@ -2131,13 +2196,13 @@ status_t universal_write_ack_proc(mec_message_t *pack)
     CM_RETURN_IFERR(mec_get_int64(pack, (int64*)&ack_write_index));
     LOG_DEBUG_INF("[DCF]recv universal_write_ack: stream_id=%u, req_id=%u, writeindex=%llu.",
         stream_id, req_id, ack_write_index);
-    if (req_id < MAX_PARALLEL_MAX_NUM) {
-        set_universal_write_index(req_id, ack_write_index);
-        cm_event_notify(&g_universal_write_info.event[req_id]);
-    } else {
-        LOG_DEBUG_ERR("[DCF]recv universal_write_ack: req_id=%u error, writeindex=%llu.", req_id, ack_write_index);
+    if (complete_parallel_req(&g_universal_write_info, req_id, stream_id, pack->head->src_inst,
+        ack_write_index) != CM_SUCCESS) {
+        LOG_DEBUG_ERR("[DCF]recv universal_write_ack: invalid req, stream_id=%u, src_node=%u, req_id=%u, "
+            "writeindex=%llu.", stream_id, pack->head->src_inst, req_id, ack_write_index);
         return CM_ERROR;
     }
+    cm_event_notify(&g_universal_write_info.event[req_id & PARALLEL_REQ_SLOT_MASK]);
     return CM_SUCCESS;
 }
 
@@ -2205,46 +2270,53 @@ status_t dcf_get_commit_index_ack_proc(mec_message_t *pack)
     CM_RETURN_IFERR(mec_get_int64(pack, (int64*)&commit_index));
     LOG_DEBUG_INF("[DCF]Recv get_commit_index_ack: stream_id=%u, req_id=%u, commit_index=%llu.",
         stream_id, req_id, commit_index);
-    if (req_id < MAX_PARALLEL_MAX_NUM) {
-        set_commit_index_result(req_id, commit_index);
-        cm_event_notify(&g_consensus_hc_info.event[req_id]);
-    } else {
-        LOG_DEBUG_ERR("[DCF]recv get_commit_index_ack: req_id=%u error, commit_index=%llu.", req_id, commit_index);
+    if (complete_parallel_req(&g_consensus_hc_info, req_id, stream_id, pack->head->src_inst,
+        commit_index) != CM_SUCCESS) {
+        LOG_DEBUG_ERR("[DCF]recv get_commit_index_ack: invalid req, stream_id=%u, src_node=%u, req_id=%u, "
+            "commit_index=%llu.", stream_id, pack->head->src_inst, req_id, commit_index);
         return CM_ERROR;
     }
+    cm_event_notify(&g_consensus_hc_info.event[req_id & PARALLEL_REQ_SLOT_MASK]);
     return CM_SUCCESS;
 }
 
 static int dcf_get_commit_index_remote(unsigned int stream_id, unsigned int is_consensus,
     unsigned long long* commit_index)
 {
-    uint32 req_id = alloc_req_id(&g_consensus_hc_info);
-    if (req_id >= MAX_PARALLEL_MAX_NUM) {
-        LOG_DEBUG_ERR("[DCF]Check health using req_id=%d invalid, try later.", req_id);
+    uint32 leader_node = elc_get_votefor(stream_id);
+    if (leader_node == CM_INVALID_NODE_ID) {
+        LOG_DEBUG_ERR("[DCF]leader=%d invalid, can't send consensus msg req now.", CM_INVALID_NODE_ID);
         return CM_ERROR;
     }
     int64 index_default = -1;
-    set_commit_index_result(req_id, index_default);
-    CM_RETURN_IFERR_EX(send_fetching_commit_index_remote_req(stream_id, is_consensus, req_id),
-        free_req_id(&g_consensus_hc_info, req_id));
+    uint32 slot_id = alloc_req_id(&g_consensus_hc_info);
+    if (slot_id >= MAX_PARALLEL_MAX_NUM) {
+        LOG_DEBUG_ERR("[DCF]Check health using req_id=%u invalid, try later.", slot_id);
+        return CM_ERROR;
+    }
+    dcf_parallel_req_t req = { slot_id, stream_id, leader_node, 0, (uint64)index_default };
+    CM_RETURN_IFERR_EX(init_parallel_req(&g_consensus_hc_info, &req),
+        free_req_id(&g_consensus_hc_info, slot_id));
+    CM_RETURN_IFERR_EX(send_fetching_commit_index_remote_req(stream_id, is_consensus, req.token, leader_node),
+        free_req_id(&g_consensus_hc_info, slot_id));
 
     timespec_t begin = cm_clock_now();
     uint64 result;
     while (((uint64)(cm_clock_now() - begin)) / MICROSECS_PER_MILLISEC < UNIVERSAL_WAIT_TIME_OUT) {
-        result = get_commit_index_result(req_id);
+        result = get_commit_index_result(slot_id);
         if ((int64)result != index_default) {
-            free_req_id(&g_consensus_hc_info, req_id);
+            free_req_id(&g_consensus_hc_info, slot_id);
 
             LOG_DEBUG_INF("[DCF]leader check health succeed, stream_id=%u result=%llu req_id=%u",
-                stream_id, result, req_id);
+                stream_id, result, slot_id);
             *commit_index = result;
             return CM_SUCCESS;
         }
-        (void)cm_event_timedwait(&g_consensus_hc_info.event[req_id], CM_SLEEP_1_FIXED);
+        (void)cm_event_timedwait(&g_consensus_hc_info.event[slot_id], CM_SLEEP_1_FIXED);
     }
     LOG_DEBUG_ERR("[DCF]Waiting health-check timeout %u ms, stream_id=%u req_id=%u",
-        UNIVERSAL_WAIT_TIME_OUT, stream_id, req_id);
-    free_req_id(&g_consensus_hc_info, req_id);
+        UNIVERSAL_WAIT_TIME_OUT, stream_id, slot_id);
+    free_req_id(&g_consensus_hc_info, slot_id);
     return CM_TIMEDOUT;
 }
 
