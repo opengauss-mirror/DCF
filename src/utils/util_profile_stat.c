@@ -484,38 +484,67 @@ static status_t append_stat_info_item(cJSON *value_item, uint32 index)
     return CM_SUCCESS;
 }
 
+static status_t append_statistics_info_item(cJSON *item_array, uint32 index)
+{
+    cJSON *item = cJSON_CreateObject();
+    CM_CHECK_NULL_PTR(item);
+
+    if (!g_stat_result.result_cache[index].is_valid) {
+        if (cJSON_AddNullToObject(item, g_stat_item_attrs[index].name) == NULL ||
+            cJSON_AddItemToArray(item_array, item) == CM_FALSE) {
+            cJSON_Delete(item);
+            LOG_DEBUG_ERR("cJSON add null/array fail when append_statistics_info");
+            return CM_ERROR;
+        }
+        return CM_SUCCESS;
+    }
+
+    cJSON *value_array = cJSON_CreateArray();
+    cJSON *value_item = cJSON_CreateObject();
+    if (value_array == NULL || value_item == NULL) {
+        cJSON_Delete(item);
+        cJSON_Delete(value_array);
+        LOG_DEBUG_ERR("cJSON create object fail when append_statistics_info");
+        return CM_ERROR;
+    }
+
+    if (append_stat_info_item(value_item, index) != CM_SUCCESS) {
+        cJSON_Delete(item);
+        cJSON_Delete(value_array);
+        LOG_DEBUG_ERR("cJSON add object fail when append_statistics_info");
+        return CM_ERROR;
+    }
+
+    if (cJSON_AddItemToArray(value_array, value_item) == CM_FALSE) {
+        cJSON_Delete(item);
+        cJSON_Delete(value_array);
+        LOG_DEBUG_ERR("cJSON AddItemToArray fail when append_statistics_info");
+        return CM_ERROR;
+    }
+
+    if (cJSON_AddItemToObject(item, g_stat_item_attrs[index].name, value_array) == CM_FALSE) {
+        if (cJSON_GetObjectItem(item, g_stat_item_attrs[index].name) != value_array) {
+            cJSON_Delete(value_array);
+        }
+        cJSON_Delete(item);
+        LOG_DEBUG_ERR("cJSON AddItemToObject fail when append_statistics_info");
+        return CM_ERROR;
+    }
+
+    if (cJSON_AddItemToArray(item_array, item) == CM_FALSE) {
+        cJSON_Delete(item);
+        LOG_DEBUG_ERR("cJSON AddItemToArray fail when append_statistics_info");
+        return CM_ERROR;
+    }
+    return CM_SUCCESS;
+}
+
 static status_t append_statistics_info_array_item(cJSON *item_array)
 {
     cm_latch_s(&g_stat_result.latch, 0, CM_FALSE, NULL);
     for (uint32 i = 0; i < STAT_ITEM_ID_CEIL; i++) {
-        cJSON *item = cJSON_CreateObject();
-        if (!g_stat_result.result_cache[i].is_valid) {
-            (void) cJSON_AddNullToObject(item, g_stat_item_attrs[i].name);
-            (void) cJSON_AddItemToArray(item_array, item);
-            continue;
-        }
-        cJSON *value_array = cJSON_CreateArray();
-        cJSON *value_item = cJSON_CreateObject();
-
-        if (append_stat_info_item(value_item, i) != CM_SUCCESS) {
+        if (append_statistics_info_item(item_array, i) != CM_SUCCESS) {
             cm_unlatch(&g_stat_result.latch, NULL);
-            LOG_DEBUG_ERR("cJSON add object fail when append_statistics_info");
-            return CM_ERROR;
-        }
-
-        if (cJSON_AddItemToArray(value_array, value_item) == CM_FALSE) {
-            cm_unlatch(&g_stat_result.latch, NULL);
-            LOG_DEBUG_ERR("cJSON AddItemToArray fail when append_statistics_info");
-            return CM_ERROR;
-        }
-        if (cJSON_AddItemToObject(item, g_stat_item_attrs[i].name, value_item) == CM_FALSE) {
-            cm_unlatch(&g_stat_result.latch, NULL);
-            LOG_DEBUG_ERR("cJSON AddItemToObject fail when append_statistics_info");
-            return CM_ERROR;
-        }
-        if (cJSON_AddItemToArray(item_array, item) == CM_FALSE) {
-            cm_unlatch(&g_stat_result.latch, NULL);
-            LOG_DEBUG_ERR("cJSON AddItemToArray fail when append_statistics_info");
             return CM_ERROR;
         }
     }
@@ -526,6 +555,11 @@ static status_t append_statistics_info_array_item(cJSON *item_array)
 status_t util_append_statistics_info(cJSON *obj)
 {
     cJSON *item_array = cJSON_CreateArray();
+    if (item_array == NULL) {
+        LOG_DEBUG_ERR("cJSON create array fail when util_append_statistics_info");
+        return CM_ERROR;
+    }
+
     if (append_statistics_info_array_item(item_array) != CM_SUCCESS) {
         LOG_DEBUG_ERR("append statistics info_array item fail");
         cJSON_Delete(item_array);
@@ -534,6 +568,7 @@ status_t util_append_statistics_info(cJSON *obj)
 
     if (cJSON_AddItemToObject(obj, "statistics_info", item_array) == CM_FALSE) {
         LOG_DEBUG_ERR("cJSON AddItemToObject fail");
+        cJSON_Delete(item_array);
         return CM_ERROR;
     }
 
