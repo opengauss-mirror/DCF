@@ -92,8 +92,9 @@ typedef enum en_dcf_errno {
     ERR_TERM_IS_EXPIRED		     = 601,
     ERR_APPEN_LOG_REQ_LOST       = 602,
     ERR_ROLE_NOT_LEADER          = 603,
+    ERR_APPEND_FROM_NON_LEADER   = 604,
     // need update DCF_ERRNO_REP_END after add new ERRNO
-    DCF_ERRNO_REP_END            = ERR_ROLE_NOT_LEADER + 1,
+    DCF_ERRNO_REP_END            = ERR_APPEND_FROM_NON_LEADER + 1,
     /* storage errors: 700 - 799 */
     DCF_ERRNO_STG_BEGIN         = 700,
     ERR_APPEND_ENTRY_FAILED     = 700,

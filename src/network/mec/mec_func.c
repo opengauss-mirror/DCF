@@ -38,6 +38,7 @@
 extern "C" {
 #endif
 
+static status_t mec_check_msg_peer_identity(const mec_pipe_t *pipe, const mec_message_head_t *head);
 static mem_pool_t g_buddy_pool;
 mem_pool_t* get_mem_pool()
 {
@@ -379,6 +380,11 @@ status_t mec_proc_recv_msg(mec_pipe_t *pipe)
     cm_reset_error();
     if (mec_read_message(&pipe->recv_pipe, &pack, pipe->priv) != CM_SUCCESS) {
         LOG_DEBUG_ERR("[MEC]mec_read_message failed. channel %d, priv %d", pipe->channel->id, pipe->priv);
+        mec_release_pack(&pack);
+        return CM_ERROR;
+    }
+
+    if (mec_check_msg_peer_identity(pipe, pack.head) != CM_SUCCESS) {
         mec_release_pack(&pack);
         return CM_ERROR;
     }
@@ -899,6 +905,48 @@ static status_t check_connect_head_info(const mec_message_head_t *head)
     return CM_SUCCESS;
 }
 
+/* Bind CONNECT claimed src_inst to the TCP/SSL remote IP in metadata. */
+static status_t mec_check_connect_peer_identity(const cs_pipe_t *pipe, uint32 claimed_src_inst)
+{
+    char peer_ip[CM_MAX_IP_LEN] = { 0 };
+    dcf_node_t node_item;
+    const sock_addr_t *remote;
+
+    if (pipe->type == CS_TYPE_SSL) {
+        remote = &pipe->link.ssl.tcp.remote;
+    } else {
+        remote = &pipe->link.tcp.remote;
+    }
+    (void)cm_inet_ntop(SOCKADDR(remote), peer_ip, CM_MAX_IP_LEN);
+
+    if (md_get_node(claimed_src_inst, &node_item) != CM_SUCCESS) {
+        LOG_RUN_ERR("[MEC][PEER_AUTH] connect rejected: unknown src_inst=%u peer_ip=%s",
+            claimed_src_inst, peer_ip);
+        return CM_ERROR;
+    }
+
+    int32 peer_len = (int32)strlen(peer_ip);
+    int32 node_len = (int32)strlen(node_item.ip);
+    if (peer_len != node_len || memcmp(peer_ip, node_item.ip, (size_t)peer_len) != EOK) {
+        LOG_RUN_ERR("[MEC][PEER_AUTH] connect identity mismatch: claimed_src=%u peer_ip=%s expect_ip=%s",
+            claimed_src_inst, peer_ip, node_item.ip);
+        return CM_ERROR;
+    }
+    return CM_SUCCESS;
+}
+
+/* After CONNECT, the pipe is bound to channels[src_inst]; later msgs must match. */
+static status_t mec_check_msg_peer_identity(const mec_pipe_t *pipe, const mec_message_head_t *head)
+{
+    uint32 bound_inst = MEC_INSTANCE_ID(pipe->channel->id);
+    if (head->src_inst != bound_inst) {
+        LOG_DEBUG_ERR("[MEC][PEER_AUTH] src_inst mismatch: msg_src=%u bound_peer=%u cmd=%u stream=%u",
+            head->src_inst, bound_inst, head->cmd, head->stream_id);
+        return CM_ERROR;
+    }
+    return CM_SUCCESS;
+}
+
 static status_t mec_accept(cs_pipe_t *pipe)
 {
     bool32          ready;
@@ -929,6 +977,9 @@ static status_t mec_accept(cs_pipe_t *pipe)
     }
 
     CM_RETURN_IFERR(check_connect_head_info(&head));
+    CM_RETURN_IFERR(mec_check_connect_peer_identity(pipe, head.src_inst));
+    LOG_RUN_INF("[MEC][PEER_AUTH] connect identity ok: src_inst=%u channel=%u",
+        head.src_inst, head.stream_id);
 
     channel = &mec_ctx->channels[head.src_inst][head.stream_id];
     msg_priv_t priv = CS_PRIV_LOW(head.flags) ? PRIV_LOW : PRIV_HIGH;

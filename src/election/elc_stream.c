@@ -542,8 +542,26 @@ status_t elc_stream_refresh_hb_time(uint32 stream_id, uint64 leader_term, int32 
     }
 
     if (elc_stream_get_votefor(stream_id) != leader_id) {
-        LOG_RUN_INF("[ELC]receive new leader's heartbeat, stream_id=%u, node_id=%u, leader_id=%u",
-            stream_id, curr_node_id, leader_id);
+        uint32 cur_votefor = elc_stream_get_votefor(stream_id);
+        /*
+         * Same-term leadership is exclusive: once votefor is set, another peer must not
+         * hijack it via heartbeat. Higher term (new election) or empty votefor may proceed.
+         */
+        if (leader_term == current_term && cur_votefor != CM_INVALID_NODE_ID) {
+            /* Typical during switchover race: old/other peer HB must not hijack votefor. */
+            static uint64 g_hb_auth_log_last[CM_MAX_STREAM_COUNT] = {0};
+            uint64 now = cm_clock_now();
+            if (now - g_hb_auth_log_last[stream_id] >= 10 * MICROSECS_PER_SECOND) {
+                g_hb_auth_log_last[stream_id] = now;
+                LOG_DEBUG_WAR("[ELC][LEADER_AUTH] reject heartbeat from non-leader, "
+                    "stream_id=%u src=%u votefor=%u term=%llu local=%u",
+                    stream_id, leader_id, cur_votefor, leader_term, curr_node_id);
+            }
+            return CM_SUCCESS;
+        }
+        LOG_DEBUG_INF("[ELC][LEADER_AUTH] accept new leader heartbeat, "
+            "stream_id=%u local=%u old_votefor=%u new_leader=%u term=%llu->%llu",
+            stream_id, curr_node_id, cur_votefor, leader_id, current_term, leader_term);
         dcf_role_t role = elc_stream_get_role(stream_id);
         if (role == DCF_ROLE_CANDIDATE || role == DCF_ROLE_PRE_CANDIDATE || role == DCF_ROLE_LEADER) {
             CM_RETURN_IFERR(elc_stream_set_role(stream_id, DCF_ROLE_FOLLOWER));
