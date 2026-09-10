@@ -895,8 +895,6 @@ static status_t check_connect_peer_info(cs_pipe_t *pipe, const mec_message_head_
 {
     dcf_node_t node_item;
     char remote_ip[CM_MAX_IP_LEN] = { 0 };
-    char peer_node_ip[CM_MAX_IP_LEN] = { 0 };
-    const char *errptr = NULL;
 
     if (md_get_node(head->src_inst, &node_item) != CM_SUCCESS) {
         return CM_ERROR;
@@ -907,16 +905,6 @@ static status_t check_connect_peer_info(cs_pipe_t *pipe, const mec_message_head_
     if (!cm_is_equal_ip(remote_ip, node_item.ip)) {
         LOG_DEBUG_ERR("[MEC]peer ip %s mismatch with src_inst %u ip %s", remote_ip, head->src_inst,
             node_item.ip);
-        return CM_ERROR;
-    }
-    if (strncpy_s(peer_node_ip, CM_MAX_IP_LEN, node_item.ip, strlen(node_item.ip)) != EOK) {
-        return CM_ERROR;
-    }
-
-    if (g_ssl_enable &&
-        cs_ssl_verify_certificate(&pipe->link.ssl, VERIFY_SUBJECT, peer_node_ip, &errptr) != CM_SUCCESS) {
-        LOG_RUN_ERR("[MEC]SSL peer certificate does not match node %u ip %s, reason %s",
-            head->src_inst, peer_node_ip, (errptr == NULL) ? "N/A" : errptr);
         return CM_ERROR;
     }
 
