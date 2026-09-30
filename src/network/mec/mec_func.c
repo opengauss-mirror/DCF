@@ -207,19 +207,9 @@ static inline status_t set_time1(mec_message_head_t *head)
     return CM_SUCCESS;
 }
 
-static status_t check_recv_head_info(const mec_message_t *msg, msg_priv_t pipe_priv)
+static status_t check_recv_head_cmd_priv(mec_context_t *mec_ctx, const mec_message_head_t *head,
+    msg_priv_t pipe_priv)
 {
-    mec_context_t *mec_ctx = get_mec_ctx();
-    uint32 cur_node = md_get_cur_node();
-    mec_message_head_t *head = msg->head;
-
-    if (md_check_stream_node_exist(head->stream_id, head->src_inst) != CM_SUCCESS
-        || head->src_inst == cur_node || head->dst_inst != cur_node) {
-        LOG_DEBUG_ERR("[MEC]rcvhead: invalid stream_id %u or src_inst %u or dst_inst %u, cur=%u",
-            head->stream_id, head->src_inst, head->dst_inst, cur_node);
-        return CM_ERROR;
-    }
-
     if (SECUREC_UNLIKELY(head->cmd >= MEC_CMD_CEIL)) {
         LOG_DEBUG_ERR("[MEC]rcvhead:invalid msg command %u", head->cmd);
         return CM_ERROR;
@@ -236,6 +226,12 @@ static status_t check_recv_head_info(const mec_message_t *msg, msg_priv_t pipe_p
             flag_priv, cmd_priv, pipe_priv, head->cmd);
         return CM_ERROR;
     }
+    return CM_SUCCESS;
+}
+
+static status_t check_recv_head_format(const mec_message_t *msg)
+{
+    mec_message_head_t *head = msg->head;
 
     if (get_mec_profile()->algorithm == COMPRESS_NONE && CS_COMPRESS(head->flags)) {
         LOG_DEBUG_ERR("[MEC]rcvhead:compress is not enable, but recv compress pkt. head_flags=%u", head->flags);
@@ -261,17 +257,33 @@ static status_t check_recv_head_info(const mec_message_t *msg, msg_priv_t pipe_p
     return CM_SUCCESS;
 }
 
-static status_t mec_read_message(cs_pipe_t *pipe, mec_message_t *msg, msg_priv_t pipe_priv)
+static status_t check_recv_head_info(const mec_pipe_t *pipe, const mec_message_t *msg, msg_priv_t pipe_priv)
+{
+    mec_message_head_t *head = msg->head;
+    uint32 cur_node = md_get_cur_node();
+    if (md_check_stream_node_exist(head->stream_id, head->src_inst) != CM_SUCCESS
+        || head->src_inst == cur_node || head->dst_inst != cur_node) {
+        LOG_DEBUG_ERR("[MEC]rcvhead: invalid stream_id %u or src_inst %u or dst_inst %u, cur=%u",
+            head->stream_id, head->src_inst, head->dst_inst, cur_node);
+        return CM_ERROR;
+    }
+    CM_RETURN_IFERR(mec_check_msg_peer_identity(pipe, head));
+    CM_RETURN_IFERR(check_recv_head_cmd_priv(get_mec_ctx(), head, pipe_priv));
+    CM_RETURN_IFERR(check_recv_head_format(msg));
+    return CM_SUCCESS;
+}
+
+static status_t mec_read_message(mec_pipe_t *pipe, mec_message_t *msg, msg_priv_t pipe_priv)
 {
     char *buf = NULL;
 
-    if (cs_read_fixed_size(pipe, msg->buffer, sizeof(mec_message_head_t)) != CM_SUCCESS) {
+    if (cs_read_fixed_size(&pipe->recv_pipe, msg->buffer, sizeof(mec_message_head_t)) != CM_SUCCESS) {
         return CM_ERROR;
     }
-    CM_RETURN_IFERR(check_recv_head_info(msg, pipe_priv));
+    CM_RETURN_IFERR(check_recv_head_info(pipe, msg, pipe_priv));
 
     buf = msg->buffer + sizeof(mec_message_head_t);
-    if (cs_read_fixed_size(pipe, buf, msg->head->size - sizeof(mec_message_head_t)) != CM_SUCCESS) {
+    if (cs_read_fixed_size(&pipe->recv_pipe, buf, msg->head->size - sizeof(mec_message_head_t)) != CM_SUCCESS) {
         return CM_ERROR;
     }
 
@@ -331,7 +343,7 @@ status_t mec_discard_recv_msg(mec_pipe_t *pipe)
         return CM_ERROR;
     }
     MEC_MESSAGE_ATTACH(&pack, get_mec_profile(), pipe->priv, msg_buf);
-    if (mec_read_message(&pipe->recv_pipe, &pack, pipe->priv) != CM_SUCCESS) {
+    if (mec_read_message(pipe, &pack, pipe->priv) != CM_SUCCESS) {
         gfree(msg_buf);
         return CM_ERROR;
     }
@@ -378,13 +390,8 @@ status_t mec_proc_recv_msg(mec_pipe_t *pipe)
     }
     MEC_MESSAGE_ATTACH(&pack, get_mec_profile(), pipe->priv, item->buffer);
     cm_reset_error();
-    if (mec_read_message(&pipe->recv_pipe, &pack, pipe->priv) != CM_SUCCESS) {
+    if (mec_read_message(pipe, &pack, pipe->priv) != CM_SUCCESS) {
         LOG_DEBUG_ERR("[MEC]mec_read_message failed. channel %d, priv %d", pipe->channel->id, pipe->priv);
-        mec_release_pack(&pack);
-        return CM_ERROR;
-    }
-
-    if (mec_check_msg_peer_identity(pipe, pack.head) != CM_SUCCESS) {
         mec_release_pack(&pack);
         return CM_ERROR;
     }
@@ -884,6 +891,26 @@ static status_t mec_init_pipe(cs_pipe_t *pipe)
     return CM_SUCCESS;
 }
 
+static status_t check_connect_peer_info(cs_pipe_t *pipe, const mec_message_head_t *head)
+{
+    dcf_node_t node_item;
+    char remote_ip[CM_MAX_IP_LEN] = { 0 };
+
+    if (md_get_node(head->src_inst, &node_item) != CM_SUCCESS) {
+        return CM_ERROR;
+    }
+    if (cm_inet_ntop(SOCKADDR(&pipe->link.tcp.remote), remote_ip, CM_MAX_IP_LEN) == NULL) {
+        return CM_ERROR;
+    }
+    if (!cm_is_equal_ip(remote_ip, node_item.ip)) {
+        LOG_DEBUG_ERR("[MEC]peer ip %s mismatch with src_inst %u ip %s", remote_ip, head->src_inst,
+            node_item.ip);
+        return CM_ERROR;
+    }
+
+    return CM_SUCCESS;
+}
+
 static status_t check_connect_head_info(const mec_message_head_t *head)
 {
     mec_context_t *mec_ctx = get_mec_ctx();
@@ -900,36 +927,6 @@ static status_t check_connect_head_info(const mec_message_head_t *head)
     }
     if (mec_ctx->channels[head->src_inst] == NULL) {
         LOG_RUN_WAR("[MEC]channel for inst[%u] not already malloc, can't accept now.", head->src_inst);
-        return CM_ERROR;
-    }
-    return CM_SUCCESS;
-}
-
-/* Bind CONNECT claimed src_inst to the TCP/SSL remote IP in metadata. */
-static status_t mec_check_connect_peer_identity(const cs_pipe_t *pipe, uint32 claimed_src_inst)
-{
-    char peer_ip[CM_MAX_IP_LEN] = { 0 };
-    dcf_node_t node_item;
-    const sock_addr_t *remote;
-
-    if (pipe->type == CS_TYPE_SSL) {
-        remote = &pipe->link.ssl.tcp.remote;
-    } else {
-        remote = &pipe->link.tcp.remote;
-    }
-    (void)cm_inet_ntop(SOCKADDR(remote), peer_ip, CM_MAX_IP_LEN);
-
-    if (md_get_node(claimed_src_inst, &node_item) != CM_SUCCESS) {
-        LOG_RUN_ERR("[MEC][PEER_AUTH] connect rejected: unknown src_inst=%u peer_ip=%s",
-            claimed_src_inst, peer_ip);
-        return CM_ERROR;
-    }
-
-    int32 peer_len = (int32)strlen(peer_ip);
-    int32 node_len = (int32)strlen(node_item.ip);
-    if (peer_len != node_len || memcmp(peer_ip, node_item.ip, (size_t)peer_len) != EOK) {
-        LOG_RUN_ERR("[MEC][PEER_AUTH] connect identity mismatch: claimed_src=%u peer_ip=%s expect_ip=%s",
-            claimed_src_inst, peer_ip, node_item.ip);
         return CM_ERROR;
     }
     return CM_SUCCESS;
@@ -977,9 +974,7 @@ static status_t mec_accept(cs_pipe_t *pipe)
     }
 
     CM_RETURN_IFERR(check_connect_head_info(&head));
-    CM_RETURN_IFERR(mec_check_connect_peer_identity(pipe, head.src_inst));
-    LOG_RUN_INF("[MEC][PEER_AUTH] connect identity ok: src_inst=%u channel=%u",
-        head.src_inst, head.stream_id);
+    CM_RETURN_IFERR(check_connect_peer_info(pipe, &head));
 
     channel = &mec_ctx->channels[head.src_inst][head.stream_id];
     msg_priv_t priv = CS_PRIV_LOW(head.flags) ? PRIV_LOW : PRIV_HIGH;
@@ -1547,7 +1542,7 @@ static status_t check_fragment_buffer_space(fragment_ctrl_t *ctrl, const mec_mes
         return CM_SUCCESS;
     }
 
-    do  {
+    do {
         new_size = new_size * CM_2X_FIXED;
     } while (new_size > 0 && bytes_needed > new_size);
 
@@ -1717,6 +1712,7 @@ static status_t mec_init_ssl()
 
     // verify ssl key password and KMC module
     CM_RETURN_IFERR(mec_verify_ssl_key_pwd(&ssl_cfg, plain, sizeof(plain) - 1));
+    ssl_cfg.verify_peer = CM_TRUE;
 
     // create acceptor fd
     get_mec_ptr()->ssl_acceptor_fd = cs_ssl_create_acceptor_fd(&ssl_cfg);
