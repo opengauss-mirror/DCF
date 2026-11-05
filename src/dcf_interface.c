@@ -23,6 +23,7 @@
  */
 
 #include "interface/dcf_interface.h"
+#include <string.h>
 #include "cm_defs.h"
 #include "util_error.h"
 #include "cm_types.h"
@@ -245,6 +246,11 @@ status_t block_node_req_proc(mec_message_t *pack)
 
     uint32 block_time_ms;
     CM_RETURN_IFERR(mec_get_int32(pack, (int32*)&block_time_ms));
+    if (block_time_ms > CM_MAX_MSG_TIMEOUT) {
+        LOG_DEBUG_ERR("block_time_ms=%u exceeds max timeout %u.", block_time_ms, CM_MAX_MSG_TIMEOUT);
+        CM_RETURN_IFERR(block_node_ack(stream_id, src_node_id, ERROR_ACK));
+        return CM_SUCCESS;
+    }
 
     block_ack_t ack = SUCCESS_ACK;
     if (elc_get_node_role(stream_id) != DCF_ROLE_LEADER
@@ -852,6 +858,11 @@ int dcf_start(unsigned int node_id, const char *cfg_str)
     }
     init_dcf_errno_desc();
     cm_reset_error();
+    if (memchr(cfg_str, '\0', (size_t)CM_MAX_STREAMS_CFG_STR_LEN + 1) == NULL) {
+        CM_THROW_ERROR_EX(ERR_PARSE_CFG_STR, "cfg_str exceeds max length %u", CM_MAX_STREAMS_CFG_STR_LEN);
+        cm_unlatch(&g_dcf_latch, NULL);
+        return CM_ERROR;
+    }
 
     do {
         status_t ret = init_main_threads(node_id, cfg_str);
@@ -1568,6 +1579,10 @@ int dcf_change_member(const char *change_str, unsigned int wait_timeout_ms)
 
     cm_reset_error();
     CM_CHECK_NULL_PTR(change_str);
+    if (memchr(change_str, '\0', (size_t)CM_MAX_CHANGE_MEMBER_STR_LEN + 1) == NULL) {
+        LOG_DEBUG_ERR("change_str is too long, max_len=%u.", CM_MAX_CHANGE_MEMBER_STR_LEN);
+        return CM_ERROR;
+    }
     LOG_OPER("dcf change member, change_str=%s wait_timeout_ms=%u", change_str, wait_timeout_ms);
 
     CM_RETURN_IFERR(parse_change_member_str(change_str, &stream_id, &node_id, &change_info));
@@ -1714,6 +1729,29 @@ bool32 log_catch_up(uint32 stream_id, uint32 node_id)
     return ((my_idx == cmp_idx) && (my_idx != 0));
 }
 
+static status_t wait_promote_leader(uint32 stream_id, uint32 node_id, dcf_role_t original_role,
+    uint32 wait_timeout_ms)
+{
+    timespec_t begin = cm_clock_now();
+    block_ack_t ack = get_block_ack(stream_id);
+    while (((uint64)(cm_clock_now() - begin)) / MICROSECS_PER_MILLISEC < wait_timeout_ms) {
+        if (ack == ERROR_ACK) {
+            LOG_DEBUG_ERR("recv error ack, ack=%d.", ack);
+            return CM_ERROR;
+        }
+        if (ack == SUCCESS_ACK && log_catch_up(stream_id, node_id)) {
+            LOG_DEBUG_INF("catch_up leader, promote now.");
+            return elc_promote_leader(stream_id, node_id);
+        }
+        CHECK_IF_ROLE_CHANGE(stream_id, original_role);
+        cm_sleep(CM_SLEEP_1_FIXED);
+        ack = get_block_ack(stream_id);
+    }
+
+    LOG_DEBUG_ERR("not yet catchup or block_ack timeout, ack=%d.", ack);
+    return CM_ERROR;
+}
+
 int dcf_promote_leader(unsigned int stream_id, unsigned int node_id, unsigned int wait_timeout_ms)
 {
     CM_RETURN_IF_FALSE(check_if_node_inited(stream_id));
@@ -1750,28 +1788,14 @@ int dcf_promote_leader(unsigned int stream_id, unsigned int node_id, unsigned in
         LOG_DEBUG_INF("wait_timeout_ms is 0, promote directly.");
         return elc_promote_leader(stream_id, node_id);
     }
+    if (wait_timeout_ms > CM_MAX_MSG_TIMEOUT) {
+        LOG_DEBUG_ERR("wait_timeout_ms=%u exceeds max timeout %u.", wait_timeout_ms, CM_MAX_MSG_TIMEOUT);
+        return CM_ERROR;
+    }
 
     set_block_ack(stream_id, NO_ACK, CM_INVALID_INDEX_ID);
     CM_RETURN_IFERR(block_node_req(stream_id, leader, wait_timeout_ms));
-    timespec_t begin = cm_clock_now();
-    block_ack_t ack = get_block_ack(stream_id);
-    while (((uint64)(cm_clock_now() - begin)) / MICROSECS_PER_MILLISEC < wait_timeout_ms) {
-        if (ack == ERROR_ACK) {
-            LOG_DEBUG_ERR("recv error ack, ack=%d.", ack);
-            return CM_ERROR;
-        } else if (ack == SUCCESS_ACK) {
-            if (log_catch_up(stream_id, node_id)) {
-                LOG_DEBUG_INF("catch_up leader, promote now.");
-                return elc_promote_leader(stream_id, node_id);
-            }
-        }
-        CHECK_IF_ROLE_CHANGE(stream_id, original_role);
-        cm_sleep(CM_SLEEP_1_FIXED);
-        ack = get_block_ack(stream_id);
-    }
-
-    LOG_DEBUG_ERR("not yet catchup or block_ack timeout, ack=%d.", ack);
-    return CM_ERROR;
+    return wait_promote_leader(stream_id, node_id, original_role, wait_timeout_ms);
 }
 
 int dcf_timeout_notify(unsigned int stream_id)
@@ -2382,6 +2406,11 @@ void dcf_set_timer(void *timer)
 int dcf_is_diff_endian(unsigned int stream_id, unsigned int dest_node_id)
 {
     cm_reset_error();
+    CM_RETURN_IF_FALSE(check_if_node_inited(stream_id));
+    if (dest_node_id == CM_INVALID_NODE_ID || dest_node_id >= CM_MAX_NODE_COUNT) {
+        LOG_DEBUG_ERR("invalid dest_node_id %u.", dest_node_id);
+        return CM_ERROR;
+    }
     return (int)mec_is_diff_endian(stream_id, dest_node_id);
 }
 
