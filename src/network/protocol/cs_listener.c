@@ -78,6 +78,7 @@ static bool32 cs_create_tcp_link(socket_t sock_ready, cs_pipe_t *pipe)
     if (link->sock == CS_INVALID_SOCKET) {
         return CM_FALSE;
     }
+    link->closed = CM_FALSE;
     if (cs_check_link_ip(link) != CM_SUCCESS) {
         cs_disconnect(pipe);
         return CM_FALSE;
@@ -89,7 +90,6 @@ static bool32 cs_create_tcp_link(socket_t sock_ready, cs_pipe_t *pipe)
     cs_set_keep_alive(link->sock, CM_TCP_KEEP_IDLE, CM_TCP_KEEP_INTERVAL, CM_TCP_KEEP_COUNT);
     cs_set_linger(link->sock, 1, 1);
 
-    link->closed = CM_FALSE;
     return CM_TRUE;
 }
 
